@@ -211,8 +211,8 @@ class GPUResourceManager:
             # API端点: http://scc.ustc.edu.cn/portal/api/ask
             # 支持的模型: deepseek-v3
             # 使用时间: 晚上10点～上午10点（测试阶段）
-            api_key = os.getenv("DEEPSEEK_API_KEY", "43e99ef3d0c3cff6e3c03c6b6071aed6")  # NSRL DeepSeek API Key
-            api_base = "http://scc.ustc.edu.cn/portal/api/ask"  # NSRL DeepSeek API 完整地址
+            api_key = os.getenv("DEEPSEEK_API_KEY", "")  # NSRL DeepSeek API Key（必须从环境变量设置）
+            api_base = os.getenv("DEEPSEEK_API_BASE", "http://scc.ustc.edu.cn/portal/api/ask")  # NSRL DeepSeek API 完整地址
             model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-v3")  # DeepSeek 模型名称
             # ================================================
             
