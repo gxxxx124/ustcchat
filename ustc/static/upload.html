@@ -1,0 +1,1837 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSRLChat - 知识库文件管理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: #ffffff;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #00d4aa, #00a8cc);
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .nav-link {
+            color: #6b7280;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            background: #f3f4f6;
+            color: #111827;
+        }
+
+        .nav-link.active {
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .upload-section {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 1rem;
+        }
+
+        .upload-area {
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 3rem 2rem;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #3b82f6;
+            background: #f8faff;
+        }
+
+        .upload-area.dragover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #9ca3af;
+            margin-bottom: 1rem;
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            color: #6b7280;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-hint {
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-list {
+            margin-top: 1.5rem;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .file-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e5e7eb;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #6b7280;
+        }
+
+        .file-details h4 {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #111827;
+            margin-bottom: 0.25rem;
+        }
+
+        .file-details p {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .btn-secondary:hover {
+            background: #e5e7eb;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.75rem;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        .status-message {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .status-success {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .status-error {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+
+        .status-info {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+        }
+        
+        .status-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        /* 上传结果样式 */
+        .upload-results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+        }
+        
+        .upload-results h3 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 18px;
+        }
+        
+        .results-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .result-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            background-color: white;
+            border-radius: 6px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .result-item.error {
+            border-left-color: #dc3545;
+        }
+        
+        .result-item .result-icon {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+        
+        .result-item .result-content {
+            flex: 1;
+        }
+        
+        .result-item .result-filename {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .result-item .result-message {
+            color: #6c757d;
+            font-size: 14px;
+        }
+        
+        .result-item .result-time {
+            color: #adb5bd;
+            font-size: 12px;
+        }
+        
+        .result-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .result-actions .btn {
+            padding: 4px 8px;
+            font-size: 12px;
+            min-width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .knowledge-base-info {
+            margin-bottom: 1.5rem;
+        }
+
+        .kb-display {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 6px;
+        }
+
+        .kb-name {
+            font-weight: 600;
+            color: #166534;
+        }
+
+        .kb-status {
+            font-size: 0.9rem;
+            color: #166534;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: white;
+            font-size: 0.9rem;
+        }
+
+        .form-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .supported-formats {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .supported-formats h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+
+        .format-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .format-tag {
+            background: #e0f2fe;
+            color: #0277bd;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* 文档列表样式 */
+        .document-list {
+            margin-top: 1rem;
+        }
+
+        .loading-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 2rem;
+            color: #6b7280;
+        }
+
+        .document-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .document-item:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+        }
+
+        .document-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .document-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e5e7eb;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #6b7280;
+            flex-shrink: 0;
+        }
+
+        .document-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .document-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #111827;
+            margin-bottom: 0.25rem;
+            word-break: break-all;
+        }
+
+        .document-meta {
+            font-size: 0.8rem;
+            color: #6b7280;
+            display: flex;
+            gap: 1rem;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+
+        .btn-sm {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.8rem;
+        }
+
+        .empty-documents {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7280;
+        }
+
+        .empty-documents .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .refresh-btn {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+
+        .refresh-btn:hover {
+            background: #e5e7eb;
+            border-color: #9ca3af;
+        }
+
+        /* 预览模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #ffffff;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f9fafb;
+        }
+
+        .modal-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #111827;
+            margin: 0;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6b7280;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #374151;
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .preview-content {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            font-size: 16px;
+            line-height: 1.7;
+            color: #1f2937;
+            background: #ffffff;
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Markdown内容样式优化 */
+        .preview-content h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #111827;
+            margin: 1.5rem 0 1rem 0;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .preview-content h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #374151;
+            margin: 1.25rem 0 0.75rem 0;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .preview-content h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #4b5563;
+            margin: 1rem 0 0.5rem 0;
+        }
+
+        .preview-content p {
+            margin: 0.75rem 0;
+            color: #374151;
+        }
+
+        .preview-content ul, .preview-content ol {
+            margin: 0.75rem 0;
+            padding-left: 1.5rem;
+        }
+
+        .preview-content li {
+            margin: 0.25rem 0;
+            color: #374151;
+        }
+
+        .preview-content strong {
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .preview-content em {
+            font-style: italic;
+            color: #4b5563;
+        }
+
+        .preview-content code {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+            font-size: 0.875rem;
+            background: #f3f4f6;
+            color: #dc2626;
+            padding: 0.125rem 0.375rem;
+            border-radius: 4px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .preview-content pre {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+            overflow-x: auto;
+        }
+
+        .preview-content pre code {
+            background: none;
+            color: #1e293b;
+            padding: 0;
+            border: none;
+            font-size: 0.875rem;
+        }
+
+        .preview-content blockquote {
+            border-left: 4px solid #3b82f6;
+            background: #f8fafc;
+            margin: 1rem 0;
+            padding: 0.75rem 1rem;
+            color: #4b5563;
+            font-style: italic;
+        }
+
+        .preview-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            background: white;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .preview-content th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #374151;
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .preview-content td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
+        }
+
+        .preview-content tr:hover {
+            background: #f9fafb;
+        }
+
+        .preview-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin: 0.5rem 0;
+        }
+
+        /* 上传队列样式 */
+        .upload-queue {
+            margin-top: 1rem;
+        }
+
+        .queue-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+
+        .queue-item.uploading {
+            background: #eff6ff;
+            border-color: #3b82f6;
+        }
+
+        .queue-item.processing {
+            background: #fffbeb;
+            border-color: #f59e0b;
+        }
+
+        .queue-item.completed {
+            background: #f0fdf4;
+            border-color: #22c55e;
+        }
+
+        .queue-item.error {
+            background: #fef2f2;
+            border-color: #ef4444;
+        }
+
+        .queue-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1;
+        }
+
+        .queue-status {
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .queue-status.uploading {
+            color: #2563eb;
+        }
+
+        .queue-status.completed {
+            color: #16a34a;
+        }
+
+        .queue-status.error {
+            color: #dc2626;
+        }
+
+        .queue-progress {
+            width: 100px;
+            height: 4px;
+            background: #e5e7eb;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .queue-progress-fill {
+            height: 100%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // 认证检查
+        async function checkAuthStatus() {
+            // 优先从Cookie获取token（CAS登录使用Cookie）
+            function getAccessToken() {
+                // 首先尝试从Cookie获取
+                const cookies = document.cookie.split(';');
+                for (let cookie of cookies) {
+                    const trimmed = cookie.trim();
+                    const equalIndex = trimmed.indexOf('=');
+                    if (equalIndex === -1) continue;
+                    
+                    const name = trimmed.substring(0, equalIndex).trim();
+                    const value = trimmed.substring(equalIndex + 1).trim();
+                    
+                    if (name === 'access_token' || name === 'access_token_root') {
+                        let tokenValue = value;
+                        // 移除可能的引号
+                        if ((tokenValue.startsWith('"') && tokenValue.endsWith('"')) || 
+                            (tokenValue.startsWith("'") && tokenValue.endsWith("'"))) {
+                            tokenValue = tokenValue.slice(1, -1);
+                        }
+                        // 同时保存到localStorage，方便后续使用
+                        localStorage.setItem('access_token', tokenValue);
+                        return tokenValue;
+                    }
+                }
+                // 如果Cookie中没有，尝试从localStorage获取
+                return localStorage.getItem('access_token');
+            }
+            
+            const token = getAccessToken();
+            if (!token) {
+                // 没有token，重定向到登录页面
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                window.location.href = basePath + '/auth/login-page';
+                return;
+            }
+            
+            try {
+                // 验证token是否有效
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                const response = await fetch(basePath + '/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    // token无效，清除并重定向
+                    localStorage.removeItem('access_token');
+                    document.cookie = 'access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                    // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                window.location.href = basePath + '/auth/login-page';
+                    return;
+                }
+                
+                const user = await response.json();
+                
+                // 调试：打印用户信息
+                console.log('=== 文件管理页面权限检查 ===');
+                console.log('用户信息:', JSON.stringify(user, null, 2));
+                console.log('用户角色类型:', typeof user.role);
+                console.log('用户角色值:', user.role);
+                console.log('角色是否等于contributor:', user.role === 'contributor');
+                console.log('角色是否等于admin:', user.role === 'admin');
+                console.log('是否为管理员:', user.is_admin);
+                
+                // 检查是否为知识库贡献者或管理员
+                // 使用更宽松的检查，支持字符串和可能的其他格式
+                const userRole = String(user.role || '').toLowerCase().trim();
+                const isContributor = userRole === 'contributor';
+                const isAdmin = userRole === 'admin';
+                
+                console.log('规范化后的角色:', userRole);
+                console.log('是否为贡献者:', isContributor);
+                console.log('是否为管理员:', isAdmin);
+                
+                if (!isContributor && !isAdmin) {
+                    console.error('权限检查失败 - 用户角色:', user.role, '类型:', typeof user.role, '规范化后:', userRole);
+                    alert('权限不足：只有知识库贡献者和管理员才能访问文件管理页面。\n当前角色: ' + (user.role || '未设置') + '\n请刷新页面重试，或联系管理员。');
+                    window.location.href = getBasePath() + '/';
+                    return;
+                }
+                
+                console.log('权限检查通过，当前用户:', user.username, '角色:', user.role);
+                
+            } catch (error) {
+                console.error('认证检查失败:', error);
+                localStorage.removeItem('access_token');
+                document.cookie = 'access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                window.location.href = basePath + '/auth/login-page';
+            }
+        }
+
+        // 页面加载时检查认证
+        window.addEventListener('load', checkAuthStatus);
+
+        // 导航函数
+        function goToChat() {
+            window.location.href = getBasePath() + '/';
+        }
+
+        function goToUpload() {
+            window.location.href = getBasePath() + '/upload.html';
+        }
+
+        // 获取基础路径的函数
+        function getBasePath() {
+            const path = window.location.pathname;
+            if (path.startsWith('/nsrlchat')) {
+                return '/nsrlchat';
+            } else if (path.startsWith('/NSRLChat')) {
+                return '/NSRLChat';
+            } else {
+                return '';
+            }
+        }
+
+        // 带认证的fetch函数
+        async function authenticatedFetch(url, options = {}) {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                throw new Error('未找到认证token，请重新登录');
+            }
+            
+            // 处理相对路径
+            if (url.startsWith('./')) {
+                url = getBasePath() + url.substring(1);
+            } else if (url.startsWith('/kb/') || url.startsWith('/auth/') || url.startsWith('/agent/')) {
+                url = getBasePath() + url;
+            }
+            
+            const headers = {
+                'Authorization': `Bearer ${token}`,
+                ...options.headers
+            };
+            
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+            
+            // 检查是否是认证错误
+            if (response.status === 401) {
+                localStorage.removeItem('access_token');
+                document.cookie = 'access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                throw new Error('认证已过期，请重新登录');
+            }
+            
+            return response;
+        }
+    </script>
+    <div class="header">
+        <h1>
+            <div class="logo">NSRL</div>
+            NSRLChat - 知识库管理
+        </h1>
+        <div class="nav-links">
+            <a href="javascript:void(0)" onclick="goToChat()" class="nav-link">返回聊天</a>
+            <a href="javascript:void(0)" onclick="goToUpload()" class="nav-link active">文件管理</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 文件上传区域 -->
+        <div class="upload-section">
+            <h2 class="section-title">上传文件</h2>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">点击或拖拽文件到此处上传</div>
+                <div class="upload-hint">支持 PDF、MD、Word、TXT 等格式</div>
+                <input type="file" id="fileInput" class="file-input" multiple accept=".pdf,.md,.txt,.docx">
+            </div>
+
+            <div class="supported-formats">
+                <h4>支持的文件格式</h4>
+                <div class="format-list">
+                    <span class="format-tag">PDF</span>
+                    <span class="format-tag">Markdown (.md)</span>
+                    <span class="format-tag">Word (.docx)</span>
+                    <span class="format-tag">纯文本 (.txt)</span>
+                </div>
+            </div>
+
+            <div id="fileList" class="file-list"></div>
+        </div>
+
+        <!-- 上传队列 -->
+        <div class="upload-section" id="uploadQueueSection" style="display: none;">
+            <h2 class="section-title">上传队列</h2>
+            <div class="upload-queue" id="uploadQueue">
+                <!-- 队列项目将在这里动态生成 -->
+            </div>
+        </div>
+
+        <!-- 状态消息 -->
+        <div id="statusMessage" class="status-message hidden"></div>
+        
+        <!-- 上传结果显示区域 -->
+        <div id="uploadResults" class="upload-results hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0;">上传结果</h3>
+                <button class="btn btn-sm btn-secondary" onclick="clearAllUploadResults()" title="清空所有结果">
+                    🗑️ 清空
+                </button>
+            </div>
+            <div id="resultsList" class="results-list"></div>
+        </div>
+
+        <!-- 知识库信息 -->
+        <div class="upload-section">
+            <h2 class="section-title">目标知识库</h2>
+            <div class="knowledge-base-info">
+                <div class="form-group">
+                    <label class="form-label">当前知识库</label>
+                    <div class="kb-display">
+                        <span class="kb-name" id="currentKbName">加载中...</span>
+                        <span class="kb-status" id="currentKbStatus">⏳ 检查连接</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文档列表 -->
+        <div class="upload-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2 class="section-title" style="margin: 0;">文档列表</h2>
+                <button class="btn btn-sm refresh-btn" onclick="loadDocuments()">
+                    <span>🔄</span>
+                    刷新
+                </button>
+            </div>
+            <div class="document-list" id="documentList">
+                <div class="loading-state">
+                    <div class="loading"></div>
+                    <span>加载文档列表中...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 预览模态框 -->
+    <div id="previewModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="previewTitle">文档预览</h3>
+                <button class="modal-close" onclick="closePreview()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="previewContent" class="preview-content">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 内联Markdown解析器，避免路径问题
+        function parseMarkdown(text) {
+            if (!text) return '';
+            
+            let html = text;
+            
+            // 转义HTML特殊字符
+            html = html.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;');
+            
+            // 标题
+            html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+            html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+            html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+            
+            // 粗体和斜体
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+            
+            // 代码块
+            html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            
+            // 链接
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            
+            // 列表
+            html = html.replace(/^\* (.+)$/gim, '<li>$1</li>');
+            html = html.replace(/^- (.+)$/gim, '<li>$1</li>');
+            html = html.replace(/^(\d+)\. (.+)$/gim, '<li>$1. $2</li>');
+            
+            // 包装列表项
+            html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+            
+            // 段落
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = '<p>' + html + '</p>';
+            
+            // 换行
+            html = html.replace(/\n/g, '<br>');
+            
+            // 清理空段落
+            html = html.replace(/<p><\/p>/g, '');
+            html = html.replace(/<p><br><\/p>/g, '');
+            
+            return html;
+        }
+        
+        // 兼容marked.parse的接口
+        window.marked = {
+            parse: parseMarkdown
+        };
+    </script>
+    <script>
+        let selectedFiles = [];
+        let uploadQueue = [];
+        let isUploading = false;
+        let currentKnowledgeBase = 'NSRL技术文档库'; // 知识库名称
+
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            setupFileUpload();
+            loadKnowledgeBaseInfo();
+            loadDocuments();
+        });
+
+        // 加载知识库信息
+        async function loadKnowledgeBaseInfo() {
+            try {
+                const response = await authenticatedFetch('./kb/api/knowledge-bases');
+                const data = await response.json();
+                
+                if (data.success && data.data.knowledge_bases.length > 0) {
+                    // 找到NSRL技术文档库
+                    const nsrlKb = data.data.knowledge_bases.find(kb => kb.name === 'NSRL技术文档库');
+                    if (nsrlKb) {
+                        // 更新页面显示
+                        document.getElementById('currentKbName').textContent = nsrlKb.name;
+                        document.getElementById('currentKbStatus').textContent = '✅ 已连接';
+                        document.getElementById('currentKbStatus').className = 'kb-status';
+                    } else {
+                        // 如果没有找到，显示默认信息
+                        document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                        document.getElementById('currentKbStatus').textContent = '❌ 未找到';
+                        document.getElementById('currentKbStatus').className = 'kb-status error';
+                    }
+                } else {
+                    // 如果API调用失败，显示默认信息
+                    document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                    document.getElementById('currentKbStatus').textContent = '❌ 连接失败';
+                    document.getElementById('currentKbStatus').className = 'kb-status error';
+                }
+            } catch (error) {
+                console.error('加载知识库信息失败:', error);
+                document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                document.getElementById('currentKbStatus').textContent = '❌ 连接失败';
+                document.getElementById('currentKbStatus').className = 'kb-status error';
+            }
+        }
+
+        // 设置文件上传
+        function setupFileUpload() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+
+            // 点击上传区域
+            uploadArea.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            // 文件选择
+            fileInput.addEventListener('change', handleFileSelect);
+
+            // 拖拽上传
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = Array.from(e.dataTransfer.files);
+                handleFiles(files);
+            });
+        }
+
+        // 处理文件选择
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            handleFiles(files);
+        }
+
+        // 处理文件
+        function handleFiles(files) {
+            console.log('处理文件:', files);
+            files.forEach(file => {
+                if (isValidFile(file)) {
+                    const fileItem = {
+                        file: file,
+                        id: String(Date.now() + Math.random()),
+                        status: 'pending',
+                        progress: 0
+                    };
+                    console.log('创建文件项:', fileItem);
+                    selectedFiles.push(fileItem);
+                    addToUploadQueue(fileItem);
+                } else {
+                    showStatus(`不支持的文件格式: ${file.name}`, 'error');
+                }
+            });
+            console.log('所有选中的文件:', selectedFiles);
+            updateFileList();
+            updateUploadQueue();
+        }
+
+        // 验证文件格式
+        function isValidFile(file) {
+            const validExtensions = ['.pdf', '.md', '.txt', '.docx'];
+            const fileName = file.name.toLowerCase();
+            return validExtensions.some(ext => fileName.endsWith(ext));
+        }
+
+        // 更新文件列表显示
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+
+            selectedFiles.forEach(fileItem => {
+                const fileDiv = document.createElement('div');
+                fileDiv.className = 'file-item';
+                fileDiv.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-icon">${getFileIcon(fileItem.file.name)}</div>
+                        <div class="file-details">
+                            <h4>${fileItem.file.name}</h4>
+                            <p>${formatFileSize(fileItem.file.size)}</p>
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        <button class="btn btn-primary" onclick="uploadFile('${fileItem.id}')" ${fileItem.status === 'uploading' || fileItem.status === 'processing' ? 'disabled' : ''}>
+                            ${fileItem.status === 'uploading' ? '<span class="loading"></span> 上传中' : 
+                              fileItem.status === 'processing' ? '<span class="loading"></span> 处理中' :
+                              fileItem.status === 'completed' ? '✅ 完成' :
+                              fileItem.status === 'error' ? '❌ 失败' : '上传'}
+                        </button>
+                        <button class="btn btn-danger" onclick="removeFile('${fileItem.id}')" ${fileItem.status === 'uploading' || fileItem.status === 'processing' ? 'disabled' : ''}>删除</button>
+                    </div>
+                    <div class="progress-bar" style="display: ${fileItem.status === 'uploading' || fileItem.status === 'processing' ? 'block' : 'none'}">
+                        <div class="progress-fill" style="width: ${fileItem.progress}%"></div>
+                        <div class="progress-text">${fileItem.status === 'uploading' ? '📤 上传中...' : fileItem.status === 'processing' ? '⚙️ 处理中...' : ''}</div>
+                    </div>
+                `;
+                fileList.appendChild(fileDiv);
+            });
+        }
+
+        // 获取文件图标
+        function getFileIcon(fileName) {
+            const ext = fileName.toLowerCase().split('.').pop();
+            const icons = {
+                'pdf': '📄',
+                'md': '📝',
+                'txt': '📄',
+                'doc': '📄',
+                'docx': '📄'
+            };
+            return icons[ext] || '📄';
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 上传文件
+        async function uploadFile(fileId) {
+            console.log('尝试上传文件，ID:', fileId, '类型:', typeof fileId);
+            console.log('当前选中的文件:', selectedFiles);
+            const fileItem = selectedFiles.find(f => String(f.id) === String(fileId));
+            if (!fileItem) {
+                console.error('找不到文件，ID:', fileId);
+                showStatus('文件不存在', 'error');
+                return;
+            }
+            console.log('找到文件:', fileItem);
+
+            // 从选择框中移除文件
+            selectedFiles = selectedFiles.filter(f => String(f.id) !== String(fileId));
+            updateFileList(); // 更新选择框显示
+
+            // 立即设置状态为等待中
+            fileItem.status = 'pending';
+            
+            // 添加到上传队列
+            addToUploadQueue(fileItem);
+            console.log('添加到队列后，队列内容:', uploadQueue);
+            
+            // 显示上传队列区域
+            const uploadQueueSection = document.getElementById('uploadQueueSection');
+            uploadQueueSection.style.display = 'block';
+            console.log('显示队列区域');
+            
+            // 更新队列显示
+            updateUploadQueue();
+            console.log('更新队列显示完成');
+            
+            // 延迟一下再开始处理队列，让用户能看到队列状态
+            setTimeout(() => {
+                processUploadQueue();
+            }, 1000);
+        }
+
+        // 添加上传队列
+        function addToUploadQueue(fileItem) {
+            if (!uploadQueue.find(item => item.id === fileItem.id)) {
+                uploadQueue.push(fileItem);
+            }
+        }
+
+        // 处理上传队列
+        async function processUploadQueue() {
+            if (isUploading || uploadQueue.length === 0) {
+                console.log('跳过队列处理，isUploading:', isUploading, '队列长度:', uploadQueue.length);
+                return;
+            }
+
+            console.log('开始处理队列，队列长度:', uploadQueue.length);
+            isUploading = true;
+            const uploadQueueSection = document.getElementById('uploadQueueSection');
+            uploadQueueSection.style.display = 'block';
+
+            // 逐个处理队列中的文件，而不是一次性处理完
+            const processNext = async () => {
+                if (uploadQueue.length === 0) {
+                    isUploading = false;
+                    console.log('队列处理完成');
+                    return;
+                }
+
+                // 找到第一个等待中的文件
+                const pendingIndex = uploadQueue.findIndex(item => item.status === 'pending');
+                if (pendingIndex === -1) {
+                    // 没有等待中的文件，检查是否还有处理中的文件
+                    const processingIndex = uploadQueue.findIndex(item => 
+                        item.status === 'uploading' || item.status === 'processing'
+                    );
+                    if (processingIndex === -1) {
+                        // 所有文件都处理完了，结束
+                        isUploading = false;
+                        console.log('队列处理完成');
+                        return;
+                    }
+                    // 还有处理中的文件，等待一下再检查
+                    setTimeout(processNext, 1000);
+                    return;
+                }
+
+                const fileItem = uploadQueue[pendingIndex];
+                console.log('处理队列中的文件:', fileItem.file.name);
+                
+                // 处理文件（不移除，让文件保持在队列中显示状态）
+                await uploadSingleFile(fileItem);
+                
+                // 处理完成后，延迟一下再处理下一个，让用户能看到状态变化
+                setTimeout(processNext, 1000);
+            };
+
+            // 开始处理第一个文件
+            processNext();
+        }
+
+        // 上传单个文件
+        async function uploadSingleFile(fileItem) {
+            fileItem.status = 'uploading';
+            fileItem.progress = 0;
+            updateUploadQueue();
+
+            try {
+                const formData = new FormData();
+                formData.append('file', fileItem.file);
+                formData.append('knowledge_base', currentKnowledgeBase);
+
+                // 开始上传
+                fileItem.progress = 10;
+                updateUploadQueue();
+
+                const response = await authenticatedFetch('./kb/api/upload-file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                // 检查响应状态
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                // 检查响应内容类型
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    throw new Error(`服务器返回了非JSON响应: ${text.substring(0, 200)}...`);
+                }
+
+                // 上传完成，开始处理
+                fileItem.status = 'processing';
+                fileItem.progress = 50;
+                updateUploadQueue();
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // 真正处理完成
+                    fileItem.status = 'completed';
+                    fileItem.progress = 100;
+                    updateUploadQueue();
+                    
+                    showStatus(`文件 ${fileItem.file.name} 处理完成`, 'success');
+                    addUploadResult(fileItem.file.name, true, '上传成功');
+                    loadDocuments(); // 上传成功后刷新文档列表
+                    
+                    // 延迟从队列中移除已完成的文件，让用户看到完成状态
+                    setTimeout(() => {
+                        removeFileFromQueue(fileItem.id);
+                    }, 3000); // 3秒后移除
+                } else {
+                    // 处理失败
+                    fileItem.status = 'error';
+                    fileItem.progress = 100;
+                    updateUploadQueue();
+                    
+                    showStatus(`处理失败: ${result.message}`, 'error');
+                    addUploadResult(fileItem.file.name, false, result.message);
+                    
+                    // 延迟从队列中移除失败的文件，让用户看到失败状态
+                    setTimeout(() => {
+                        removeFileFromQueue(fileItem.id);
+                    }, 3000); // 3秒后移除
+                }
+            } catch (error) {
+                // 网络错误或其他异常
+                fileItem.status = 'error';
+                fileItem.progress = 100;
+                updateUploadQueue();
+                
+                showStatus(`处理失败: ${error.message}`, 'error');
+                addUploadResult(fileItem.file.name, false, error.message);
+                
+                // 延迟从队列中移除失败的文件，让用户看到失败状态
+                setTimeout(() => {
+                    removeFileFromQueue(fileItem.id);
+                }, 3000); // 3秒后移除
+            }
+        }
+
+        // 删除文件
+        function removeFile(fileId) {
+            selectedFiles = selectedFiles.filter(f => String(f.id) !== String(fileId));
+            uploadQueue = uploadQueue.filter(f => String(f.id) !== String(fileId));
+            updateFileList();
+            updateUploadQueue();
+        }
+
+        // 从队列中移除文件
+        function removeFileFromQueue(fileId) {
+            uploadQueue = uploadQueue.filter(f => String(f.id) !== String(fileId));
+            updateUploadQueue();
+        }
+
+        // 更新上传队列显示
+        function updateUploadQueue() {
+            console.log('更新队列显示，当前队列长度:', uploadQueue.length);
+            const uploadQueueElement = document.getElementById('uploadQueue');
+            if (uploadQueue.length === 0) {
+                uploadQueueElement.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 1rem;">队列为空</p>';
+                return;
+            }
+
+            const queueHTML = uploadQueue.map(item => `
+                <div class="queue-item ${item.status}">
+                    <div class="queue-info">
+                        <span>${item.file.name}</span>
+                        <span class="queue-status ${item.status}">
+                            ${item.status === 'pending' ? '⏳ 等待中' : 
+                              item.status === 'uploading' ? '📤 上传中' :
+                              item.status === 'processing' ? '⚙️ 处理中' :
+                              item.status === 'completed' ? '✅ 已完成' : '❌ 失败'}
+                        </span>
+                    </div>
+                    <div class="queue-progress">
+                        <div class="queue-progress-fill" style="width: ${item.progress}%"></div>
+                    </div>
+                </div>
+            `).join('');
+            
+            console.log('生成的队列HTML:', queueHTML);
+            uploadQueueElement.innerHTML = queueHTML;
+        }
+
+        // 预览文档
+        async function previewDocument(documentName) {
+            const modal = document.getElementById('previewModal');
+            const title = document.getElementById('previewTitle');
+            const content = document.getElementById('previewContent');
+            
+            title.textContent = `预览: ${documentName}`;
+            content.textContent = '加载中...';
+            modal.style.display = 'block';
+
+            try {
+                const response = await authenticatedFetch(`./kb/api/document/${encodeURIComponent(currentKnowledgeBase)}/${encodeURIComponent(documentName)}/preview`);
+                const data = await response.json();
+
+                if (data.success) {
+                    // 使用Markdown解析器渲染内容
+                    content.innerHTML = marked.parse(data.data.content);
+                } else {
+                    content.textContent = `预览失败: ${data.message}`;
+                }
+            } catch (error) {
+                console.error('预览失败:', error);
+                content.textContent = `预览失败: ${error.message}`;
+            }
+        }
+
+        // 关闭预览
+        function closePreview() {
+            const modal = document.getElementById('previewModal');
+            modal.style.display = 'none';
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('previewModal');
+            if (event.target === modal) {
+                closePreview();
+            }
+        }
+
+        // 显示状态消息
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.textContent = message;
+            statusDiv.className = `status-message status-${type}`;
+            statusDiv.classList.remove('hidden');
+
+            setTimeout(() => {
+                statusDiv.classList.add('hidden');
+            }, 5000);
+        }
+        
+        // 添加上传结果
+        function addUploadResult(filename, success, message) {
+            const resultsDiv = document.getElementById('uploadResults');
+            const resultsList = document.getElementById('resultsList');
+            
+            // 显示结果区域
+            resultsDiv.classList.remove('hidden');
+            
+            // 创建结果项
+            const resultItem = document.createElement('div');
+            resultItem.className = `result-item ${success ? '' : 'error'}`;
+            resultItem.id = `result-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            const icon = success ? '✅' : '❌';
+            const time = new Date().toLocaleTimeString();
+            
+            resultItem.innerHTML = `
+                <div class="result-icon">${icon}</div>
+                <div class="result-content">
+                    <div class="result-filename">${filename}</div>
+                    <div class="result-message">${message}</div>
+                </div>
+                <div class="result-actions">
+                    <div class="result-time">${time}</div>
+                    <button class="btn btn-sm btn-danger" onclick="deleteUploadResult('${resultItem.id}')" title="删除此结果">
+                        ×
+                    </button>
+                </div>
+            `;
+            
+            // 添加到结果列表顶部
+            resultsList.insertBefore(resultItem, resultsList.firstChild);
+        }
+
+        // 删除上传结果
+        function deleteUploadResult(resultId) {
+            const resultItem = document.getElementById(resultId);
+            if (resultItem) {
+                resultItem.remove();
+                
+                // 检查是否还有结果，如果没有则隐藏结果区域
+                const resultsList = document.getElementById('resultsList');
+                if (resultsList.children.length === 0) {
+                    const resultsDiv = document.getElementById('uploadResults');
+                    resultsDiv.classList.add('hidden');
+                }
+            }
+        }
+
+        // 清空所有上传结果
+        function clearAllUploadResults() {
+            if (confirm('确定要清空所有上传结果吗？')) {
+                const resultsList = document.getElementById('resultsList');
+                resultsList.innerHTML = '';
+                const resultsDiv = document.getElementById('uploadResults');
+                resultsDiv.classList.add('hidden');
+            }
+        }
+
+        // 加载文档列表
+        async function loadDocuments() {
+            const documentList = document.getElementById('documentList');
+            documentList.innerHTML = `
+                <div class="loading-state">
+                    <div class="loading"></div>
+                    <span>加载文档列表中...</span>
+                </div>
+            `;
+
+            try {
+                const response = await authenticatedFetch(`./kb/api/knowledge-base/${encodeURIComponent(currentKnowledgeBase)}/documents`);
+                const data = await response.json();
+
+                if (data.success) {
+                    displayDocuments(data.data.documents || []);
+                } else {
+                    documentList.innerHTML = `
+                        <div class="empty-documents">
+                            <div class="icon">❌</div>
+                            <p>加载文档列表失败: ${data.message}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载文档列表失败:', error);
+                documentList.innerHTML = `
+                    <div class="empty-documents">
+                        <div class="icon">❌</div>
+                        <p>加载文档列表失败: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 显示文档列表
+        function displayDocuments(documents) {
+            const documentList = document.getElementById('documentList');
+            
+            if (documents.length === 0) {
+                documentList.innerHTML = `
+                    <div class="empty-documents">
+                        <div class="icon">📄</div>
+                        <p>暂无文档</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // 处理文档数据 - 可能是字符串数组或对象数组
+            const processedDocs = documents.map(doc => {
+                if (typeof doc === 'string') {
+                    return { name: doc, chunks: 0 };
+                }
+                return doc;
+            });
+
+            documentList.innerHTML = processedDocs.map(doc => `
+                <div class="document-item">
+                    <div class="document-info">
+                        <div class="document-icon">${getDocumentIcon(doc.name)}</div>
+                        <div class="document-details">
+                            <div class="document-name">${doc.name}</div>
+                            <div class="document-meta">
+                                <span>类型: ${getDocumentType(doc.name)}</span>
+                                ${doc.chunks ? `<span>块数: ${doc.chunks}</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="document-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="previewDocument('${doc.name}')">
+                            预览
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteDocument('${doc.name}')">
+                            删除
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 获取文档图标
+        function getDocumentIcon(fileName) {
+            const ext = fileName.toLowerCase().split('.').pop();
+            const icons = {
+                'pdf': '📄',
+                'md': '📝',
+                'txt': '📄',
+                'doc': '📄',
+                'docx': '📄'
+            };
+            return icons[ext] || '📄';
+        }
+
+        // 获取文档类型
+        function getDocumentType(fileName) {
+            const ext = fileName.toLowerCase().split('.').pop();
+            const types = {
+                'pdf': 'PDF文档',
+                'md': 'Markdown',
+                'txt': '纯文本',
+                'doc': 'Word文档',
+                'docx': 'Word文档'
+            };
+            return types[ext] || '未知类型';
+        }
+
+        // 删除文档
+        async function deleteDocument(documentName) {
+            if (!confirm(`确定要删除文档 "${documentName}" 吗？此操作不可撤销。`)) {
+                return;
+            }
+
+            try {
+                const response = await authenticatedFetch('./kb/api/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        knowledge_base_name: currentKnowledgeBase,
+                        document_name: documentName,
+                        delete_type: 'document'
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showStatus(`文档 "${documentName}" 删除成功`, 'success');
+                    loadDocuments(); // 重新加载文档列表
+                } else {
+                    showStatus(`删除失败: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('删除文档失败:', error);
+                showStatus(`删除失败: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

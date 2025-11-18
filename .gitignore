@@ -1,0 +1,160 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+
+# 环境变量和配置文件
+.env
+.env.local
+.env.*.local
+*.env
+config.local.py
+secrets.py
+
+# 日志文件
+*.log
+logs/
+*.log.*
+server.log
+OCRFlux-debug.log
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+qdrant_storage/
+qdrant/
+snapshots/
+storage/
+vector_db/
+
+# 临时文件和输出
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+marker_outputs/
+marker_test_output/
+test2_images/
+zip/
+
+# 模型文件（通常很大，不提交到Git）
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+*.pb
+*.tflite
+*.pkl
+*.joblib
+
+# OSS存储
+oss/
+autodl-tmp/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# 测试文件
+test_upload.html
+test.txt
+test_docs/
+
+# 文档输出
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+
+# 压缩文件
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# 特定项目的敏感文件
+update_admin_password.py
+set_admin.py
+init_admin.py
+migrate_user_roles.py
+check_*.py
+test_*.py
+verify_*.py
+
+# 配置文件（可能包含敏感信息）
+nginx*.conf
+*.conf.local
+qdrant_config.yaml
+
+# 其他
+.python-version
+*.pyc
+*.pyo
+*.pyd
+

@@ -1,0 +1,1732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSRLChat</title>
+    <!-- 添加Markdown渲染支持 -->
+    <script>
+        // 内联Markdown解析器，避免路径问题
+        function parseMarkdown(text) {
+            if (!text) return '';
+            
+            let html = text;
+            
+            // 转义HTML特殊字符
+            html = html.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;');
+            
+            // 标题
+            html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+            html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+            html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+            
+            // 粗体和斜体
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+            
+            // 代码块
+            html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            
+            // 链接
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            
+            // 列表
+            html = html.replace(/^\* (.+)$/gim, '<li>$1</li>');
+            html = html.replace(/^- (.+)$/gim, '<li>$1</li>');
+            html = html.replace(/^(\d+)\. (.+)$/gim, '<li>$1. $2</li>');
+            
+            // 包装列表项
+            html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+            
+            // 段落
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = '<p>' + html + '</p>';
+            
+            // 换行
+            html = html.replace(/\n/g, '<br>');
+            
+            // 清理空段落
+            html = html.replace(/<p><\/p>/g, '');
+            html = html.replace(/<p><br><\/p>/g, '');
+            
+            return html;
+        }
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #ffffff;
+            color: #333333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #00d4aa;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header .logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .header .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00d4aa;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: #f8f9fa;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .sidebar-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333333;
+            margin-bottom: 16px;
+        }
+
+        .btn-new-chat {
+            width: 100%;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #00d4aa, #00a8cc);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-new-chat:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 212, 170, 0.3);
+        }
+
+        .btn-new-chat:active {
+            transform: translateY(0);
+        }
+
+        .chat-history {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 20px 20px;
+        }
+
+        .chat-item {
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-item:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+        }
+
+        .chat-item.active {
+            background: linear-gradient(135deg, #00d4aa, #00a8cc);
+            border-color: #00d4aa;
+        }
+
+        .chat-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .chat-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #333333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .chat-item.active .chat-title {
+            color: #ffffff;
+        }
+
+        .chat-time {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .chat-item.active .chat-time {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .btn-delete {
+            background: #ff4757;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .chat-item:hover .btn-delete {
+            opacity: 1;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-height: calc(100vh - 200px); /* 限制最大高度 */
+        }
+
+        /* 新对话时的居中布局 */
+        .messages.empty {
+            justify-content: center;
+            align-items: center;
+            padding: 40px 24px;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            background: linear-gradient(135deg, #00d4aa, #00a8cc);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant {
+            background: #f3f4f6;
+            color: #333333;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Markdown渲染样式 */
+        .message.assistant h1,
+        .message.assistant h2,
+        .message.assistant h3,
+        .message.assistant h4,
+        .message.assistant h5,
+        .message.assistant h6 {
+            margin: 16px 0 8px 0;
+            color: #1f2937;
+            font-weight: 600;
+        }
+
+        .message.assistant h1 { font-size: 1.5em; }
+        .message.assistant h2 { font-size: 1.3em; }
+        .message.assistant h3 { font-size: 1.2em; }
+
+        .message.assistant p {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+
+        .message.assistant ul,
+        .message.assistant ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .message.assistant li {
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+
+        .message.assistant code {
+            background: #e5e7eb;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .message.assistant pre {
+            background: #f8f9fa;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 12px 0;
+            overflow-x: auto;
+        }
+
+        .message.assistant pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .message.assistant blockquote {
+            border-left: 4px solid #00d4aa;
+            margin: 12px 0;
+            padding: 8px 16px;
+            background: #f8f9fa;
+            color: #6b7280;
+        }
+
+        .message.assistant table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12px 0;
+        }
+
+        .message.assistant th,
+        .message.assistant td {
+            border: 1px solid #d1d5db;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        .message.assistant th {
+            background: #f3f4f6;
+            font-weight: 600;
+        }
+
+        .message.assistant strong {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .message.assistant em {
+            font-style: italic;
+            color: #6b7280;
+        }
+
+        .message.thinking {
+            background: #f8f9fa;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+            font-style: italic;
+        }
+
+        .message.tool-result {
+            background: #f8f9fa;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+        }
+
+        .input-container {
+            padding: 20px 24px;
+            background: #ffffff;
+            border-top: 1px solid #e5e7eb;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .input-field {
+            flex: 1;
+            background: #f8f9fa;
+            border: 2px solid #e5e7eb;
+            border-radius: 24px;
+            padding: 14px 20px;
+            color: #333333;
+            font-size: 15px;
+            resize: none;
+            min-height: 52px;
+            max-height: 120px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #00d4aa;
+            box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.2);
+        }
+
+        .input-field::placeholder {
+            color: #9ca3af;
+        }
+
+        .send-button {
+            background: linear-gradient(135deg, #00d4aa, #00a8cc);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            width: 52px;
+            height: 52px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            box-shadow: 0 3px 6px rgba(0, 212, 170, 0.3);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .send-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 212, 170, 0.3);
+        }
+
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .loading-dots {
+            display: inline-block;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #00d4aa;
+            animation: loading 1.4s infinite ease-in-out both;
+        }
+
+        .loading-dots:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dots:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes loading {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .empty-state h3 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            color: #333333;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .empty-state p {
+            font-size: 20px;
+            margin-bottom: 0;
+            color: #6b7280;
+            font-weight: 400;
+        }
+
+        /* 新对话时的输入框容器 */
+        .empty-input-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        /* 新对话时的输入框样式 */
+        .empty-input-container .input-wrapper {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .empty-input-container .input-field {
+            min-height: 60px;
+            font-size: 16px;
+            padding: 16px 24px;
+            border: 2px solid #e5e7eb;
+            border-radius: 28px;
+            background: #ffffff;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .empty-input-container .input-field:focus {
+            border-color: #00d4aa;
+            box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .empty-input-container .input-field::placeholder {
+            color: #9ca3af;
+            font-size: 16px;
+        }
+
+        .empty-input-container .send-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 28px;
+            font-size: 16px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0, 212, 170, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .empty-input-container .send-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 212, 170, 0.5);
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 200px;
+            }
+            
+            .messages {
+                padding: 16px;
+            }
+            
+            .input-container {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            <div class="logo">
+                <img id="logo-img" src="" alt="USTC" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div style="display: none; width: 100%; height: 100%; background: linear-gradient(135deg, #00d4aa, #00a8cc); align-items: center; justify-content: center; font-weight: bold; color: white; font-size: 14px;">USTC</div>
+            </div>
+            NSRLChat
+        </h1>
+        <div class="connection-status">
+            <div class="status-dot"></div>
+            <span id="connectionText">连接中...</span>
+            <button id="adminBtn" onclick="goToAdmin()" style="margin-left: 16px; background: #00d4aa; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">管理控制台</button>
+            <button id="logoutBtn" onclick="logout()" style="margin-left: 8px; background: #ff4757; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">退出登录</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h3>对话管理</h3>
+                <button class="btn-new-chat" onclick="startNewChat()">
+                    <span>+</span>
+                    开启新对话
+                </button>
+            </div>
+            <div class="sidebar-section" id="knowledgeBaseSection" style="display: none;">
+                <h3>知识库管理</h3>
+                <button class="btn-new-chat" onclick="openKnowledgeBase()">
+                    <span>📚</span>
+                    文件管理
+                </button>
+            </div>
+            <div class="sidebar-section" style="flex: 1; padding-top: 0;">
+                <h3>历史对话</h3>
+                <div class="chat-history" id="chatHistory">
+                    <!-- 历史对话将在这里动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <div class="messages empty" id="messages">
+                <div class="empty-state">
+                    <h3>欢迎使用NSRLChat</h3>
+                    <p>我是您的智能助手，可以帮您解决关于NSRL的各种问题</p>
+                </div>
+                <div class="empty-input-container">
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="messageInput" 
+                            class="input-field" 
+                            placeholder="有什么我可以帮助您的吗？"
+                            rows="1"
+                        ></textarea>
+                        <button id="sendButton" class="send-button" onclick="sendMessage()">
+                            <span>发送</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="input-container" id="normalInputContainer" style="display: none;">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput2" 
+                        class="input-field" 
+                        placeholder="请输入您的问题..."
+                        rows="1"
+                    ></textarea>
+                    <button id="sendButton2" class="send-button" onclick="sendMessage()">
+                        <span>发送</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = '';
+        let currentUserId = '';
+        let currentConversationId = '';
+        let isLoading = false;
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查登录状态（只在主页面检查，避免在登录页面形成循环）
+            // 如果当前路径是登录页面，不执行认证检查
+            const currentPath = window.location.pathname;
+            if (!currentPath.includes('/auth/login-page') && !currentPath.includes('/auth/login')) {
+                checkAuthStatus();
+            }
+            
+            // 动态设置图片路径，支持子目录挂载
+            const logoImg = document.getElementById('logo-img');
+            if (logoImg) {
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                logoImg.src = basePath + '/ustc.svg';
+            }
+            
+            // 获取用户ID并生成会话ID
+            getCurrentUserId().then(() => {
+                generateSessionId('default');
+                clearAllLocalStorageChats(); // 清理所有localStorage数据
+                loadConversationsFromAPI();
+            }).catch(() => {
+                // 如果获取用户ID失败，使用匿名用户
+                currentUserId = 'anonymous';
+                generateSessionId('default');
+                clearAllLocalStorageChats(); // 清理所有localStorage数据
+                loadConversationsFromAPI();
+            });
+            checkConnectionStatus();
+            setInterval(checkConnectionStatus, 30000);
+            
+            // 获取两个输入框
+            const inputField = document.getElementById('messageInput');
+            const inputField2 = document.getElementById('messageInput2');
+            
+            // 同步两个输入框的内容
+            function syncInputFields() {
+                inputField2.value = inputField.value;
+                inputField2.style.height = inputField.style.height;
+            }
+            
+            // 自动调整输入框高度
+            function adjustHeight(element) {
+                element.style.height = 'auto';
+                element.style.height = Math.min(element.scrollHeight, 120) + 'px';
+            }
+            
+            inputField.addEventListener('input', function() {
+                adjustHeight(this);
+                syncInputFields();
+            });
+            
+            inputField2.addEventListener('input', function() {
+                adjustHeight(this);
+                inputField.value = this.value;
+                inputField.style.height = this.style.height;
+            });
+
+            // 回车发送消息
+            inputField.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            
+            inputField2.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+        });
+
+        // 获取token的辅助函数（优先从Cookie获取，如果没有则从localStorage获取）
+        function getAccessToken() {
+            // 首先尝试从Cookie获取（CAS登录使用Cookie）
+            const cookies = document.cookie.split(';');
+            for (let cookie of cookies) {
+                const trimmed = cookie.trim();
+                const equalIndex = trimmed.indexOf('=');
+                if (equalIndex === -1) continue;
+                
+                const name = trimmed.substring(0, equalIndex).trim();
+                const value = trimmed.substring(equalIndex + 1).trim();
+                
+                if (name === 'access_token' || name === 'access_token_root') {
+                    // 移除可能的引号
+                    let tokenValue = value;
+                    if ((tokenValue.startsWith('"') && tokenValue.endsWith('"')) || 
+                        (tokenValue.startsWith("'") && tokenValue.endsWith("'"))) {
+                        tokenValue = tokenValue.slice(1, -1);
+                    }
+                    // 同时保存到localStorage，方便后续使用
+                    localStorage.setItem('access_token', tokenValue);
+                    console.log('从Cookie获取token:', name, tokenValue.substring(0, 30) + '...');
+                    return tokenValue;
+                }
+            }
+            // 如果Cookie中没有，尝试从localStorage获取（传统登录使用）
+            const storedToken = localStorage.getItem('access_token');
+            if (storedToken) {
+                console.log('从localStorage获取token:', storedToken.substring(0, 30) + '...');
+            }
+            return storedToken;
+        }
+
+        // 检查认证状态
+        async function checkAuthStatus() {
+            // 防止在登录页面形成循环重定向
+            const currentPath = window.location.pathname;
+            console.log('checkAuthStatus - 当前路径:', currentPath);
+            if (currentPath.includes('/auth/login-page') || currentPath.includes('/auth/login')) {
+                console.log('当前在登录页面，跳过认证检查');
+                return;
+            }
+            
+            const token = getAccessToken();
+            console.log('checkAuthStatus - token存在:', !!token);
+            if (!token) {
+                // 没有token，重定向到登录页面
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                const loginUrl = basePath + '/auth/login-page';
+                console.log('checkAuthStatus - 重定向到登录页面:', loginUrl);
+                // 使用 replace 而不是 href，避免在历史记录中留下记录
+                window.location.replace(loginUrl);
+                return;
+            }
+            
+            try {
+                // 验证token是否有效
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                const response = await fetch(basePath + '/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    // token无效，清除并重定向
+                    localStorage.removeItem('access_token');
+                    // 获取基础路径，支持子路径部署
+                    let basePath = '';
+                    const path = window.location.pathname;
+                    if (path.startsWith('/nsrlchat')) {
+                        basePath = '/nsrlchat';
+                    } else if (path.startsWith('/NSRLChat')) {
+                        basePath = '/NSRLChat';
+                    } else {
+                        basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                    }
+                    // 使用 replace 而不是 href，避免在历史记录中留下记录
+                    window.location.replace(basePath + '/auth/login-page');
+                    return;
+                }
+                
+                const user = await response.json();
+                console.log('当前用户:', user.username);
+                
+                // 如果是管理员，显示管理控制台按钮
+                if (user.role === 'admin') {
+                    const adminBtn = document.getElementById('adminBtn');
+                    if (adminBtn) {
+                        adminBtn.style.display = 'inline-block';
+                    }
+                }
+                
+                // 如果是管理员或知识库贡献者，显示知识库管理
+                if (user.role === 'admin' || user.role === 'contributor') {
+                    const knowledgeBaseSection = document.getElementById('knowledgeBaseSection');
+                    if (knowledgeBaseSection) {
+                        knowledgeBaseSection.style.display = 'block';
+                    }
+                }
+                
+            } catch (error) {
+                console.error('认证检查失败:', error);
+                localStorage.removeItem('access_token');
+                // 防止在登录页面形成循环重定向
+                const currentPath = window.location.pathname;
+                if (currentPath.includes('/auth/login-page') || currentPath.includes('/auth/login')) {
+                    console.log('当前在登录页面，不执行重定向');
+                    return;
+                }
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                // 使用 replace 而不是 href，避免在历史记录中留下记录
+                window.location.replace(basePath + '/auth/login-page');
+            }
+        }
+
+        // 获取当前用户ID
+        async function getCurrentUserId() {
+            try {
+                const token = getAccessToken();
+                if (!token) {
+                    currentUserId = 'anonymous';
+                    return;
+                }
+                
+                // 获取基础路径
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                
+                const response = await fetch(basePath + '/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const userData = await response.json();
+                    currentUserId = userData.id || 'anonymous';
+                } else {
+                    currentUserId = 'anonymous';
+                }
+            } catch (error) {
+                console.error('获取用户ID失败:', error);
+                currentUserId = 'anonymous';
+            }
+        }
+
+        // 生成会话ID - 基于用户ID确保跨设备一致性
+        function generateSessionId(sessionName = 'default') {
+            if (!currentUserId) {
+                currentUserId = 'anonymous';
+            }
+            // 使用用户ID + 会话名称生成一致的会话ID
+            // 这样同一用户在不同设备上会使用相同的会话ID
+            currentSessionId = `user_${currentUserId}_${sessionName}`;
+        }
+
+        // 开始新对话
+        async function startNewChat() {
+            if (isLoading) return;
+            
+            console.log('开始新对话 - 当前对话ID:', currentConversationId);
+            
+            // 保存当前对话（如果有的话）
+            if (currentConversationId) {
+                await saveCurrentConversation();
+            }
+            
+            // 生成新的会话ID和对话ID
+            // 重要：session_id 和 conversation_id 必须保持一致，用于后端隔离对话历史
+            const timestamp = Date.now();
+            currentConversationId = `user_${currentUserId}_session_${timestamp}`;
+            currentSessionId = currentConversationId;  // 保持一致
+            // 重置保存标记
+            window.lastSavedConversationId = null;
+            
+            console.log('新对话 - conversationId:', currentConversationId);
+            console.log('新对话 - sessionId:', currentSessionId);
+            
+            // 重置到空状态
+            const messagesContainer = document.getElementById('messages');
+            const normalInputContainer = document.getElementById('normalInputContainer');
+            
+            messagesContainer.classList.add('empty');
+            messagesContainer.innerHTML = `
+                <div class="empty-state">
+                    <h3>欢迎使用NSRLChat</h3>
+                    <p>我是您的智能助手，可以帮您解决关于NSRL的各种问题</p>
+                </div>
+                <div class="empty-input-container">
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="messageInput" 
+                            class="input-field" 
+                            placeholder="有什么我可以帮助您的吗？"
+                            rows="1"
+                        ></textarea>
+                        <button id="sendButton" class="send-button" onclick="sendMessage()">
+                            <span>发送</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            normalInputContainer.style.display = 'none';
+            
+            // 重新绑定事件
+            const inputField = document.getElementById('messageInput');
+            if (inputField) {
+                inputField.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                });
+                
+                inputField.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+            }
+            
+            // 生成新的会话ID（使用时间戳确保唯一性）
+            const sessionName = 'session_' + Date.now();
+            generateSessionId(sessionName);
+            
+            // 重新加载对话列表
+            loadConversationsFromAPI();
+            
+            // 滚动到底部
+            scrollToBottom();
+        }
+
+        // 打开知识库管理页面
+        function openKnowledgeBase() {
+            // 使用相对路径，确保在子路径下也能正常工作
+            const basePath = window.location.pathname.replace(/\/$/, '');
+            window.open(basePath + '/upload.html', '_blank');
+        }
+
+        // 保存当前对话
+        function saveCurrentChat() {
+            const messages = document.querySelectorAll('.message');
+            if (messages.length === 0) return;
+            
+            const firstUserMessage = Array.from(messages).find(msg => msg.classList.contains('user'));
+            if (!firstUserMessage) return;
+            
+            const title = getChatTitle(firstUserMessage.textContent);
+            const chatData = {
+                id: currentSessionId,
+                userId: currentUserId,
+                title: title,
+                timestamp: new Date().toISOString(),
+                messages: Array.from(messages).map(msg => ({
+                    role: msg.classList.contains('user') ? 'user' : 'assistant',
+                    content: msg.textContent
+                }))
+            };
+            
+            // 保存到localStorage，使用用户ID作为键
+            const userChatsKey = `nsrl_chats_${currentUserId}`;
+            const savedChats = JSON.parse(localStorage.getItem(userChatsKey) || '[]');
+            
+            // 检查是否已存在相同ID的对话，如果存在则更新，否则添加
+            const existingIndex = savedChats.findIndex(chat => chat.id === currentSessionId);
+            if (existingIndex !== -1) {
+                savedChats[existingIndex] = chatData;
+            } else {
+                savedChats.push(chatData);
+            }
+            
+            localStorage.setItem(userChatsKey, JSON.stringify(savedChats));
+        }
+
+        // 获取对话标题
+        function getChatTitle(content) {
+            return content.length > 30 ? content.substring(0, 30) + '...' : content;
+        }
+
+        // 保存当前对话到数据库
+        async function saveCurrentConversation() {
+            const messages = document.querySelectorAll('.message');
+            console.log('保存对话 - 消息数量:', messages.length, '对话ID:', currentConversationId);
+            
+            if (messages.length === 0 || !currentConversationId) {
+                console.log('跳过保存 - 没有消息或对话ID');
+                return;
+            }
+            
+            // 检查是否已经保存过（避免重复保存）
+            if (window.lastSavedConversationId === currentConversationId) {
+                console.log('跳过保存 - 对话已保存过');
+                return;
+            }
+            
+            try {
+                // 获取第一条用户消息作为标题
+                const firstUserMessage = Array.from(messages).find(msg => msg.classList.contains('user'));
+                if (!firstUserMessage) return;
+                
+                const title = getChatTitle(firstUserMessage.textContent);
+                
+                // 准备对话数据
+                const chatData = {
+                    conversation_id: currentConversationId,
+                    title: title,
+                    messages: Array.from(messages).map(msg => ({
+                        role: msg.classList.contains('user') ? 'user' : 'assistant',
+                        content: msg.textContent
+                    }))
+                };
+                
+                // 获取基础路径
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                
+                const token = getAccessToken();
+                if (!token) {
+                    console.log('没有token，跳过保存到数据库');
+                    return;
+                }
+                
+                // 保存到数据库
+                const response = await fetch(`${basePath}/agent/conversations/save`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(chatData)
+                });
+                
+                if (response.ok) {
+                    console.log('对话已保存到数据库:', chatData);
+                    // 标记已保存，避免重复保存
+                    window.lastSavedConversationId = currentConversationId;
+                    // 重新加载对话列表以显示最新状态
+                    loadConversationsFromAPI();
+                } else {
+                    console.error('保存对话到数据库失败:', response.status);
+                }
+                
+            } catch (error) {
+                console.error('保存对话失败:', error);
+            }
+        }
+
+        // 清理所有localStorage中的对话数据
+        function clearAllLocalStorageChats() {
+            // 清理当前用户的对话数据
+            const userChatsKey = `nsrl_chats_${currentUserId}`;
+            localStorage.removeItem(userChatsKey);
+            
+            // 清理所有可能的对话数据键
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('nsrl_chats_') || key.includes('conversation') || key.includes('chat'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                console.log('已清理localStorage键:', key);
+            });
+            
+            console.log('已清理所有localStorage中的对话数据');
+        }
+
+        // 从数据库加载对话历史
+        async function loadConversationsFromAPI() {
+            try {
+                // 清理所有localStorage中的对话数据
+                clearAllLocalStorageChats();
+                
+                // 直接从数据库API加载
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                
+                const token = getAccessToken();
+                
+                console.log('加载对话历史 - 用户ID:', currentUserId);
+                console.log('基础路径:', basePath);
+                
+                if (!token) {
+                    console.log('没有token，显示空列表');
+                    updateChatHistoryUI([]);
+                    return;
+                }
+                
+                // 先尝试使用现有的sessions API
+                const url = `${basePath}/agent/sessions`;
+                console.log('请求URL:', url);
+                
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                console.log('响应状态:', response.status);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('API返回数据:', data);
+                    // 转换sessions数据格式为conversations格式
+                    const conversations = (data.sessions || []).map(session => ({
+                        conversation_id: session.session_id,
+                        title: session.session_name || '默认会话',
+                        created_at: session.last_updated,
+                        message_count: session.message_count || 0
+                    }));
+                    updateChatHistoryUI(conversations);
+                } else {
+                    console.error('获取对话历史失败:', response.status);
+                    const errorText = await response.text();
+                    console.error('错误详情:', errorText);
+                    updateChatHistoryUI([]);
+                }
+            } catch (error) {
+                console.error('获取对话历史失败:', error);
+                updateChatHistoryUI([]);
+            }
+        }
+
+        // 更新历史对话UI
+        function updateChatHistoryUI(chats = []) {
+            const chatHistory = document.getElementById('chatHistory');
+            
+            console.log('更新对话UI - 对话数量:', chats.length);
+            console.log('对话数据:', chats);
+            
+            if (chats.length === 0) {
+                chatHistory.innerHTML = '<div style="color: #6b7280; text-align: center; padding: 20px;">暂无历史对话</div>';
+                return;
+            }
+            
+            chatHistory.innerHTML = chats.map(chat => {
+                console.log('生成对话UI - 对话数据:', chat);
+                const conversationId = chat.conversation_id || chat.id || 'unknown';
+                return `
+                    <div class="chat-item" onclick="loadConversation('${conversationId}')">
+                        <div class="chat-info">
+                            <div class="chat-title">${chat.title || '新对话'}</div>
+                            <div class="chat-time">${new Date(chat.created_at || chat.timestamp).toLocaleString()}</div>
+                        </div>
+                        <button class="btn-delete" onclick="deleteConversation('${conversationId}', event)">×</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 从数据库加载指定对话
+        async function loadConversation(conversationId) {
+            if (isLoading) return;
+            
+            try {
+                // 保存当前对话（如果有的话）
+                if (currentConversationId && currentConversationId !== conversationId) {
+                    await saveCurrentConversation();
+                }
+                
+                // 更新当前对话ID和会话ID
+                // 重要：session_id 必须与 conversation_id 保持一致，用于后端隔离对话历史
+                currentConversationId = conversationId;
+                // 从 conversationId 中提取 session_id（去掉 user_ 前缀和 conv_ 前缀）
+                // conversationId 格式可能是：user_16_session_1762492376381 或 conv_anonymous_1762492815
+                // 需要转换为 session_id 格式：user_{user_id}_{session_name}
+                if (conversationId.startsWith('user_')) {
+                    // 如果 conversationId 已经是 user_ 格式，直接使用
+                    currentSessionId = conversationId;
+                } else if (conversationId.startsWith('conv_')) {
+                    // 如果是 conv_ 格式，需要转换为 user_ 格式
+                    // conv_anonymous_1762492815 -> user_anonymous_session_1762492815
+                    const parts = conversationId.split('_');
+                    if (parts.length >= 3) {
+                        const userId = parts[1];
+                        const sessionName = parts.slice(2).join('_');
+                        currentSessionId = `user_${userId}_session_${sessionName}`;
+                    } else {
+                        currentSessionId = `user_${currentUserId}_${conversationId}`;
+                    }
+                } else {
+                    // 其他格式，使用当前用户ID和conversationId
+                    currentSessionId = `user_${currentUserId}_${conversationId}`;
+                }
+                
+                console.log('加载对话 - conversationId:', conversationId);
+                console.log('加载对话 - sessionId:', currentSessionId);
+                
+                // 直接从数据库API加载
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                
+                const token = getAccessToken();
+                
+                if (!token) {
+                    alert('请先登录');
+                    return;
+                }
+                
+                // 使用现有的sessions API来获取对话历史
+                const response = await fetch(`${basePath}/agent/sessions/${conversationId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    // currentConversationId 已经在上面设置过了，不需要重复设置
+                    
+                    // 显示对话历史
+                    const messagesContainer = document.getElementById('messages');
+                    const history = data.conversation_history || data.history || [];
+                    messagesContainer.innerHTML = history.map(msg => `
+                        <div class="message ${msg.role}">${msg.content}</div>
+                    `).join('');
+                    
+                    // 确保输入框可见
+                    const normalInputContainer = document.getElementById('normalInputContainer');
+                    if (normalInputContainer) {
+                        normalInputContainer.style.display = 'block';
+                    }
+                    
+                    // 移除空状态样式
+                    messagesContainer.classList.remove('empty');
+                    
+                    // 不要清空历史对话列表，保持显示
+                    // updateChatHistoryUI(); // 注释掉这行，避免清空历史对话列表
+                    scrollToBottom();
+                } else {
+                    console.error('加载对话失败:', response.status);
+                    alert('加载对话失败');
+                }
+            } catch (error) {
+                console.error('加载对话失败:', error);
+                alert('加载对话失败');
+            }
+        }
+
+        // 删除对话
+        async function deleteConversation(conversationId, event) {
+            event.stopPropagation();
+            
+            if (confirm('确定要删除这个对话吗？')) {
+                try {
+                    // 获取基础路径
+                    let basePath = '';
+                    const path = window.location.pathname;
+                    if (path.startsWith('/nsrlchat')) {
+                        basePath = '/nsrlchat';
+                    } else if (path.startsWith('/NSRLChat')) {
+                        basePath = '/NSRLChat';
+                    } else {
+                        basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                    }
+                    
+                    const token = getAccessToken();
+                    
+                    if (!token) {
+                        alert('请先登录');
+                        return;
+                    }
+                    
+                    const response = await fetch(`${basePath}/agent/sessions/${conversationId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    // 无论API是否成功，都从localStorage删除
+                    const userChatsKey = `nsrl_chats_${currentUserId}`;
+                    const savedChats = JSON.parse(localStorage.getItem(userChatsKey) || '[]');
+                    const updatedChats = savedChats.filter(chat => chat.conversation_id !== conversationId);
+                    localStorage.setItem(userChatsKey, JSON.stringify(updatedChats));
+                    console.log('已从localStorage删除对话:', conversationId);
+                    
+                    if (response.ok) {
+                        console.log('已从数据库删除对话:', conversationId);
+                    } else {
+                        console.error('从数据库删除对话失败:', response.status);
+                        // 即使数据库删除失败，localStorage已经删除了，所以继续执行
+                    }
+                    
+                    // 如果删除的是当前对话，开始新对话
+                    if (conversationId === currentConversationId) {
+                        startNewChat();
+                    } else {
+                        // 重新加载对话列表
+                        loadConversationsFromAPI();
+                    }
+                } catch (error) {
+                    console.error('删除对话失败:', error);
+                    alert('删除对话失败');
+                }
+            }
+        }
+
+
+        // 检查连接状态
+        async function checkConnectionStatus() {
+            try {
+                // 使用绝对路径，确保在子路径下也能正常工作
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                const healthUrl = basePath + '/health';
+                const response = await fetch(healthUrl);
+                const data = await response.json();
+                const statusText = document.getElementById('connectionText');
+                const statusDot = document.querySelector('.status-dot');
+                
+                if (data.status === 'healthy') {
+                    statusText.textContent = '已连接';
+                    statusDot.style.background = '#00d4aa';
+                } else {
+                    statusText.textContent = '连接异常';
+                    statusDot.style.background = '#ff4757';
+                }
+            } catch (error) {
+                console.error('连接检查失败:', error);
+                const statusText = document.getElementById('connectionText');
+                const statusDot = document.querySelector('.status-dot');
+                statusText.textContent = '连接失败';
+                statusDot.style.background = '#ff4757';
+            }
+        }
+
+        // 发送消息
+        async function sendMessage() {
+            console.log('sendMessage 被调用');
+            
+            // 如果没有当前对话ID，生成一个新的
+            if (!currentConversationId) {
+                currentConversationId = `user_${currentUserId}_session_${Date.now()}`;
+                console.log('生成新的对话ID:', currentConversationId);
+            }
+            
+            // 获取当前活动的输入框
+            const inputField = document.getElementById('messageInput');
+            const inputField2 = document.getElementById('messageInput2');
+            
+            console.log('inputField:', inputField);
+            console.log('inputField2:', inputField2);
+            console.log('inputField.value:', inputField ? inputField.value : 'null');
+            console.log('inputField2.value:', inputField2 ? inputField2.value : 'null');
+            
+            // 优先使用有内容的输入框
+            let message = '';
+            if (inputField && inputField.value.trim()) {
+                message = inputField.value.trim();
+                console.log('使用 inputField，消息:', message);
+            } else if (inputField2 && inputField2.value.trim()) {
+                message = inputField2.value.trim();
+                console.log('使用 inputField2，消息:', message);
+            }
+            
+            console.log('最终消息:', message);
+            console.log('isLoading:', isLoading);
+            
+            if (!message || isLoading) {
+                console.log('消息为空或正在加载，退出');
+                return;
+            }
+            
+            // 清空所有输入框
+            if (inputField) {
+                inputField.value = '';
+                inputField.style.height = 'auto';
+            }
+            if (inputField2) {
+                inputField2.value = '';
+                inputField2.style.height = 'auto';
+            }
+            
+            // 添加用户消息
+            addMessage(message, 'user');
+            
+            // 显示加载状态
+            showLoading();
+            
+            try {
+                // 使用绝对路径，确保在子路径下也能正常工作
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                const chatUrl = basePath + '/agent/chat';
+                console.log('发送聊天请求到:', chatUrl);
+                console.log('当前路径:', window.location.pathname);
+                console.log('基础路径:', basePath);
+                
+                const token = getAccessToken();
+                const response = await fetch(chatUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        knowledge_base_name: 'NSRL技术文档库',
+                        session_id: currentSessionId,
+                        conversation_id: currentConversationId,
+                        enable_web_search: false
+                    })
+                });
+                
+                console.log('响应状态:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('响应数据:', data);
+                
+                // 隐藏加载状态
+                hideLoading();
+                
+                // 处理响应
+                if (data.response) {
+                    // 解析思考过程和最终回答
+                    const responseText = data.response;
+                    const thinkingMatch = responseText.match(/<think>([\s\S]*?)<\/think>/);
+                    const finalAnswer = responseText.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+                    
+                    // 添加思考过程（如果有）
+                    if (thinkingMatch) {
+                        addMessage(thinkingMatch[1], 'thinking');
+                    }
+                    
+                    // 添加最终回答
+                    if (finalAnswer) {
+                        addMessage(finalAnswer, 'assistant');
+                    }
+                } else {
+                    addMessage('抱歉，我无法处理您的请求。', 'assistant');
+                }
+                
+                // 保存当前对话（只在发送消息时保存，避免重复）
+                await saveCurrentConversation();
+                
+            } catch (error) {
+                hideLoading();
+                console.error('聊天请求失败:', error);
+                console.error('错误详情:', {
+                    message: error.message,
+                    stack: error.stack,
+                    url: basePath + '/agent/chat'
+                });
+                addMessage(`抱歉，发生了错误：${error.message}。请检查浏览器控制台获取详细信息。`, 'assistant');
+            }
+        }
+
+        // 添加消息到界面
+        function addMessage(content, type) {
+            const messagesContainer = document.getElementById('messages');
+            const normalInputContainer = document.getElementById('normalInputContainer');
+            
+            // 如果是第一条消息，切换到正常布局
+            if (messagesContainer.classList.contains('empty')) {
+                messagesContainer.classList.remove('empty');
+                messagesContainer.innerHTML = '';
+                normalInputContainer.style.display = 'block';
+            }
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            // 对于助手消息，使用Markdown渲染；对于用户消息，保持纯文本
+            if (type === 'assistant' || type === 'thinking' || type === 'tool-result') {
+                // 使用自定义Markdown解析器
+                messageDiv.innerHTML = parseMarkdown(content);
+            } else {
+                // 用户消息保持纯文本
+                messageDiv.textContent = content;
+            }
+            
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        // 显示加载状态
+        function showLoading() {
+            isLoading = true;
+            const messagesContainer = document.getElementById('messages');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message assistant loading';
+            loadingDiv.id = 'loadingMessage';
+            loadingDiv.innerHTML = `
+                <div class="loading-dots"></div>
+                <div class="loading-dots"></div>
+                <div class="loading-dots"></div>
+                <span>正在思考...</span>
+            `;
+            messagesContainer.appendChild(loadingDiv);
+            scrollToBottom();
+        }
+
+        // 隐藏加载状态
+        function hideLoading() {
+            isLoading = false;
+            const loadingMessage = document.getElementById('loadingMessage');
+            if (loadingMessage) {
+                loadingMessage.remove();
+            }
+        }
+
+        // 滚动到底部
+        function scrollToBottom() {
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // 跳转到管理控制台
+        function goToAdmin() {
+            const basePath = window.location.pathname.replace(/\/$/, '');
+            window.location.href = basePath + '/auth/admin';
+        }
+
+        // 退出登录
+        function logout() {
+            if (confirm('确定要退出登录吗？')) {
+                // 清除localStorage
+                localStorage.removeItem('access_token');
+                
+                // 获取基础路径，支持子路径部署
+                let basePath = '';
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    basePath = '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    basePath = '/NSRLChat';
+                } else {
+                    basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+                }
+                
+                // 清除所有Cookie（包括access_token和access_token_root）
+                // 需要清除不同path的Cookie
+                const cookiePaths = ['/', basePath ? basePath : '/'];
+                const cookieNames = ['access_token', 'access_token_root'];
+                
+                for (const cookieName of cookieNames) {
+                    for (const cookiePath of cookiePaths) {
+                        // 清除Cookie（设置过期时间为过去）
+                        document.cookie = `${cookieName}=; path=${cookiePath}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+                        // 也尝试清除带斜杠的路径
+                        if (cookiePath !== '/') {
+                            document.cookie = `${cookieName}=; path=${cookiePath}/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+                        }
+                    }
+                }
+                
+                console.log('已清除所有Cookie和localStorage');
+                
+                // 重定向到登录页面
+                window.location.href = basePath + '/auth/login-page';
+            }
+        }
+
+    </script>
+</body>
+</html>
