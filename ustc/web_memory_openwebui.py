@@ -207,11 +207,11 @@ class GPUResourceManager:
         if "ollama" not in self.model_instances:
             # 使用Open WebUI API
             # =============== Open WebUI API 配置 ===============
-            # 服务器地址: http://202.38.77.52
+            # 服务器地址: 从环境变量读取
             # API Key: 从 Open WebUI 设置 > 账户获取
             # 支持的模型: DeepSeek-R1-Distill-Qwen-32B, DeepSeek-R1-Distill-Llama-70B
-            api_key = os.getenv("OPENWEBUI_API_KEY", "sk-30d613e68c54494facd7641b694aced1")  # Open WebUI API Key
-            api_base = "http://202.38.77.52/api"  # Open WebUI API 地址（需要 /api 前缀）
+            api_key = os.getenv("OPENWEBUI_API_KEY", "")  # Open WebUI API Key（必须从环境变量设置）
+            api_base = os.getenv("OPENWEBUI_API_BASE", "")  # Open WebUI API 地址（必须从环境变量设置）
             model_name = os.getenv("OPENWEBUI_MODEL", "../../models/deepseek-r1-70b/deepseek-r1-70b.gguf")  # Open WebUI 模型路径
             # ================================================
             
@@ -3432,10 +3432,16 @@ async def lifespan(app: FastAPI):
         
         # 2. 初始化数据库连接池（Agent需要）
         logger.info("初始化数据库连接池...")
-        # 对话历史专用数据库
-        CHAT_HISTORY_DB_URI = "postgresql://chat_history_user:chat_history_pass@localhost:5432/chat_history_db?sslmode=disable"
-        # 原有的LangGraph数据库
-        DB_URI = "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        # 对话历史专用数据库（从环境变量读取）
+        CHAT_HISTORY_DB_URI = os.getenv(
+            "CHAT_HISTORY_DB_URI",
+            "postgresql://chat_history_user:chat_history_pass@localhost:5432/chat_history_db?sslmode=disable"
+        )
+        # 原有的LangGraph数据库（从环境变量读取）
+        DB_URI = os.getenv(
+            "DB_URI",
+            "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        )
         connection_kwargs = {
             "autocommit": True,
             "prepare_threshold": 0,

@@ -1179,7 +1179,10 @@ async def lifespan(app: FastAPI):
         
         # 2. 初始化数据库连接池（Agent需要）
         logger.info("初始化数据库连接池...")
-        DB_URI = "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        DB_URI = os.getenv(
+            "DB_URI",
+            "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        )
         connection_kwargs = {
             "autocommit": True,
             "prepare_threshold": 0,

@@ -209,8 +209,8 @@ def get_ollama_model(self):
             # =============== DeepSeek API 配置 ===============
             # 获取API Key: https://platform.deepseek.com/
             # 支持的模型: deepseek-chat, deepseek-coder, deepseek-r3
-            api_key = os.getenv("DEEPSEEK_API_KEY", "sk-8939eef671dc4c4294a3b5ecd542f083")  # 请替换为您的DeepSeek API Key
-            api_base = "https://api.deepseek.com"  # DeepSeek API 地址
+            api_key = os.getenv("DEEPSEEK_API_KEY", "")  # DeepSeek API Key（必须从环境变量设置）
+            api_base = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")  # DeepSeek API 地址
             model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")  # DeepSeek 模型名称
             # ================================================
             

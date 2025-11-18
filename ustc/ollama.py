@@ -333,8 +333,11 @@ async def lifespan(app: FastAPI):
     global graph, checkpointer
     pool = None
     try:
-        # 使用 AsyncConnectionPool 替代 SQLAlchemy 引擎
-        DB_URI = "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        # 使用 AsyncConnectionPool 替代 SQLAlchemy 引擎（从环境变量读取）
+        DB_URI = os.getenv(
+            "DB_URI",
+            "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+        )
         connection_kwargs = {
             "autocommit": True,
             "prepare_threshold": 0,

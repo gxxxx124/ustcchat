@@ -93,9 +93,11 @@ def should_continue(state: AgentState):
 
 # 7. 正确实现短期对话记忆
 if __name__ == "__main__":
-    # 从环境变量获取数据库密码（更安全的方式）
-
-    DB_URI = "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+    # 从环境变量获取数据库连接字符串（更安全的方式）
+    DB_URI = os.getenv(
+        "DB_URI",
+        "postgresql://postgres:postgres@localhost:5432/langgraph_db?sslmode=disable"
+    )
 
     # >>>> 关键修改：在with块内创建和使用graph <<<<
     with PostgresSaver.from_conn_string(DB_URI) as checkpointer:

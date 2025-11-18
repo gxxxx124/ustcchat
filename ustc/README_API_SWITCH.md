@@ -20,8 +20,8 @@
 def get_ollama_model(self):
     """获取Open WebUI API模型实例（按需加载）"""
     if "ollama" not in self.model_instances:
-        api_key = os.getenv("OPENWEBUI_API_KEY", "sk-30d613e68c54494facd7641b694aced1")
-        api_base = "http://202.38.77.52/api"
+        api_key = os.getenv("OPENWEBUI_API_KEY", "")  # 必须从环境变量设置
+        api_base = os.getenv("OPENWEBUI_API_BASE", "")  # 必须从环境变量设置
         model_name = os.getenv("OPENWEBUI_MODEL", "../../models/deepseek-r1-70b/deepseek-r1-70b.gguf")
         # ...
 ```
@@ -31,7 +31,7 @@ def get_ollama_model(self):
 def get_ollama_model(self):
     """获取DeepSeek API模型实例（按需加载）"""
     if "ollama" not in self.model_instances:
-        api_key = os.getenv("DEEPSEEK_API_KEY", "sk-8939eef671dc4c4294a3b5ecd542f083")
+        api_key = os.getenv("DEEPSEEK_API_KEY", "")  # 必须从环境变量设置
         api_base = "https://api.deepseek.com"
         model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         # ...
@@ -89,7 +89,7 @@ tail -f server.log
 
 | 特性 | DeepSeek API | Open WebUI API |
 |------|-------------|----------------|
-| API 地址 | `https://api.deepseek.com` | `http://202.38.77.52/api` |
+| API 地址 | `https://api.deepseek.com` | 从环境变量 `OPENWEBUI_API_BASE` 读取 |
 | 工具绑定 | 支持 `bind_tools()` | 不支持，使用文本解析 |
 | 工具调用方式 | 标准 `tool_calls` 属性 | 文本解析 JSON |
 | 模型名称 | `deepseek-chat` | `../../models/deepseek-r1-70b/deepseek-r1-70b.gguf` |

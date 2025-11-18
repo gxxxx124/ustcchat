@@ -8,8 +8,13 @@ from openai import AsyncOpenAI
 
 async def simple_chat():
     """简单的聊天测试"""
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        print("❌ 错误: 请设置环境变量 DEEPSEEK_API_KEY")
+        return False
+    
     client = AsyncOpenAI(
-        api_key="sk-8939eef671dc4c4294a3b5ecd542f083",
+        api_key=api_key,
         base_url="https://api.deepseek.com"
     )
     
