@@ -24,7 +24,7 @@ python web_memory.py
 ## 📡 API 接口
 - **健康检查**: `GET http://localhost:8000/health`
 - **聊天接口**: `POST http://localhost:8000/agent/chat`
-- **知识库管理**: `http://localhost:8000/kb/`
+
 
 ## 💡 使用示例
 ```bash
