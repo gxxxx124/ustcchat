@@ -12,10 +12,51 @@
             
             let html = text;
             
-            // 转义HTML特殊字符
+            // 先处理链接（在转义之前），避免链接被转义破坏
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, text, url) {
+                // 转义链接文本中的HTML特殊字符
+                const escapedText = text.replace(/&/g, '&amp;')
+                                       .replace(/</g, '&lt;')
+                                       .replace(/>/g, '&gt;');
+                
+                // 如果是知识库文档预览链接（以./kb/api/document/开头），使用预览框打开
+                if (url.startsWith('./kb/api/document/') || url.startsWith('/kb/api/document/')) {
+                    // 提取知识库名称和文档名称
+                    const urlParts = url.split('/');
+                    const kbIndex = urlParts.indexOf('document');
+                    if (kbIndex >= 0 && kbIndex + 2 < urlParts.length) {
+                        const kbName = decodeURIComponent(urlParts[kbIndex + 1]);
+                        const docName = decodeURIComponent(urlParts[kbIndex + 2].replace('/preview', ''));
+                        // 使用data属性存储信息，点击时打开预览框
+                        return '<a href="javascript:void(0)" class="doc-preview-link" data-kb="' + 
+                               kbName.replace(/"/g, '&quot;') + '" data-doc="' + 
+                               docName.replace(/"/g, '&quot;') + '" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">' + 
+                               escapedText + '</a>';
+                    }
+                }
+                
+                // 其他链接正常处理
+                return '<a href="' + url + '" target="_blank" style="color: #3b82f6; text-decoration: underline;">' + escapedText + '</a>';
+            });
+            
+            // 转义剩余的HTML特殊字符（但保留已生成的HTML标签）
+            // 使用临时标记保护已生成的HTML标签
+            const tagPlaceholders = {};
+            let tagIndex = 0;
+            html = html.replace(/<[^>]+>/g, function(match) {
+                const placeholder = `__TAG_PLACEHOLDER_${tagIndex++}__`;
+                tagPlaceholders[placeholder] = match;
+                return placeholder;
+            });
+            
             html = html.replace(/&/g, '&amp;')
                        .replace(/</g, '&lt;')
                        .replace(/>/g, '&gt;');
+            
+            // 恢复HTML标签
+            for (const [placeholder, tag] of Object.entries(tagPlaceholders)) {
+                html = html.replace(placeholder, tag);
+            }
             
             // 标题
             html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
@@ -29,9 +70,6 @@
             // 代码块
             html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
             html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-            
-            // 链接
-            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
             
             // 列表
             html = html.replace(/^\* (.+)$/gim, '<li>$1</li>');
@@ -627,6 +665,151 @@
                 padding: 16px;
             }
         }
+
+        /* 预览模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #ffffff;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 95vw;
+            min-width: 400px;
+            height: 80vh;
+            min-height: 300px;
+            max-height: 95vh;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            resize: both;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-content::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            cursor: ew-resize;
+            z-index: 10;
+        }
+        
+        .modal-resize-handle-right {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            cursor: ew-resize;
+            z-index: 10;
+        }
+        
+        .modal-resize-handle-top {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 4px;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        
+        .modal-resize-handle-bottom {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 4px;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        
+        .modal-content::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(-45deg, transparent 30%, #cbd5e1 30%, #cbd5e1 35%, transparent 35%, transparent 65%, #cbd5e1 65%, #cbd5e1 70%, transparent 70%);
+            cursor: nwse-resize;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .modal-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f9fafb;
+        }
+
+        .modal-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            color: #6b7280;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+            background: #e5e7eb;
+            color: #333;
+        }
+
+        .modal-body {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 1.5rem;
+        }
+
+        .preview-content {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .preview-content iframe {
+            width: 100%;
+            height: 100%;
+            flex: 1;
+            min-height: 0;
+            border: none;
+        }
     </style>
 </head>
 <body>
@@ -706,6 +889,22 @@
         </div>
     </div>
 
+    <!-- 预览模态框 -->
+    <div id="previewModal" class="modal">
+        <div class="modal-content" id="previewModalContent">
+            <div class="modal-resize-handle-top"></div>
+            <div class="modal-resize-handle-right"></div>
+            <div class="modal-resize-handle-bottom"></div>
+            <div class="modal-header">
+                <h3 class="modal-title" id="previewTitle">文档预览</h3>
+                <button class="modal-close" onclick="closePreview()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="previewContent" class="preview-content">加载中...</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentSessionId = '';
         let currentUserId = '';
@@ -739,13 +938,20 @@
             
             // 获取用户ID并生成会话ID
             getCurrentUserId().then(() => {
-                generateSessionId('default');
+                // 页面初始化时，生成一个新的唯一session_id，而不是使用固定的'default'
+                const timestamp = Date.now();
+                currentConversationId = `user_${currentUserId}_session_${timestamp}`;
+                currentSessionId = currentConversationId;
+                console.log('页面初始化 - 生成新的session_id:', currentSessionId);
                 clearAllLocalStorageChats(); // 清理所有localStorage数据
                 loadConversationsFromAPI();
             }).catch(() => {
                 // 如果获取用户ID失败，使用匿名用户
                 currentUserId = 'anonymous';
-                generateSessionId('default');
+                const timestamp = Date.now();
+                currentConversationId = `user_${currentUserId}_session_${timestamp}`;
+                currentSessionId = currentConversationId;
+                console.log('页面初始化（匿名用户）- 生成新的session_id:', currentSessionId);
                 clearAllLocalStorageChats(); // 清理所有localStorage数据
                 loadConversationsFromAPI();
             });
@@ -1051,9 +1257,10 @@
                 });
             }
             
-            // 生成新的会话ID（使用时间戳确保唯一性）
-            const sessionName = 'session_' + Date.now();
-            generateSessionId(sessionName);
+            // 注意：session_id已经在上面通过currentConversationId设置了，这里不需要再次生成
+            // 确保session_id和conversation_id保持一致
+            console.log('新对话完成 - conversationId:', currentConversationId);
+            console.log('新对话完成 - sessionId:', currentSessionId);
             
             // 重新加载对话列表
             loadConversationsFromAPI();
@@ -1496,7 +1703,9 @@
             // 如果没有当前对话ID，生成一个新的
             if (!currentConversationId) {
                 currentConversationId = `user_${currentUserId}_session_${Date.now()}`;
+                currentSessionId = currentConversationId;  // 保持一致
                 console.log('生成新的对话ID:', currentConversationId);
+                console.log('生成新的会话ID:', currentSessionId);
             }
             
             // 获取当前活动的输入框
@@ -1568,7 +1777,7 @@
                     },
                     body: JSON.stringify({
                         message: message,
-                        knowledge_base_name: 'NSRL技术文档库',
+                        knowledge_base_name: 'NSRL文档库',
                         session_id: currentSessionId,
                         conversation_id: currentConversationId,
                         enable_web_search: false
@@ -1646,6 +1855,23 @@
             }
             
             messagesContainer.appendChild(messageDiv);
+            
+            // 绑定文档预览链接的点击事件
+            if (type === 'assistant' || type === 'thinking' || type === 'tool-result') {
+                const docLinks = messageDiv.querySelectorAll('.doc-preview-link');
+                docLinks.forEach(link => {
+                    link.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const kbName = this.getAttribute('data-kb');
+                        const docName = this.getAttribute('data-doc');
+                        if (kbName && docName) {
+                            previewDocumentFromChat(kbName, docName);
+                        }
+                    });
+                });
+            }
+            
             scrollToBottom();
         }
 
@@ -1727,6 +1953,304 @@
             }
         }
 
+        // 获取基础路径（如果还没有定义）
+        if (typeof getBasePath === 'undefined') {
+            window.getBasePath = function() {
+                const path = window.location.pathname;
+                if (path.startsWith('/nsrlchat')) {
+                    return '/nsrlchat';
+                } else if (path.startsWith('/NSRLChat')) {
+                    return '/NSRLChat';
+                }
+                return '';
+            };
+        }
+
+        // 获取认证token（如果还没有定义）
+        if (typeof getAccessToken === 'undefined') {
+            window.getAccessToken = function() {
+                return localStorage.getItem('access_token') || '';
+            };
+        }
+
+        // 认证请求函数（如果还没有定义）
+        if (typeof authenticatedFetch === 'undefined') {
+            window.authenticatedFetch = async function(url, options = {}) {
+                const token = getAccessToken();
+                const headers = {
+                    'Authorization': `Bearer ${token}`,
+                    ...options.headers
+                };
+                return fetch(url, { ...options, headers });
+            };
+        }
+
+        // 从聊天界面预览文档
+        async function previewDocumentFromChat(kbName, docName) {
+            console.log('预览文档:', kbName, docName);
+            const modal = document.getElementById('previewModal');
+            const title = document.getElementById('previewTitle');
+            const content = document.getElementById('previewContent');
+            
+            if (!modal) {
+                console.error('预览模态框不存在');
+                return;
+            }
+            
+            title.textContent = `预览: ${docName}`;
+            content.textContent = '加载中...';
+            modal.style.display = 'block';
+            
+            // 初始化调整大小功能
+            setTimeout(initPreviewResize, 100);
+
+            try {
+                // 构建预览API URL
+                const basePath = typeof getBasePath !== 'undefined' ? getBasePath() : (window.getBasePath ? window.getBasePath() : '');
+                const previewUrl = `${basePath}/kb/api/document/${encodeURIComponent(kbName)}/${encodeURIComponent(docName)}/preview`;
+                console.log('预览API URL:', previewUrl);
+                
+                // 使用全局的authenticatedFetch或window.authenticatedFetch
+                const fetchFunc = typeof authenticatedFetch !== 'undefined' ? authenticatedFetch : (window.authenticatedFetch || async function(url, options = {}) {
+                    const token = (typeof getAccessToken !== 'undefined' ? getAccessToken() : (window.getAccessToken ? window.getAccessToken() : localStorage.getItem('access_token') || ''));
+                    const headers = {
+                        'Authorization': `Bearer ${token}`,
+                        ...options.headers
+                    };
+                    return fetch(url, { ...options, headers });
+                });
+                
+                const response = await fetchFunc(previewUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                console.log('预览API响应:', data);
+
+                if (data.success) {
+                    // 检查是否是原文件预览
+                    if (data.data.content_type === 'original_file' && data.data.original_file_url) {
+                        // 原文件预览（PDF等）
+                        const fileType = data.data.file_type || '';
+                        if (fileType === '.pdf') {
+                            // PDF文件使用iframe预览
+                            let fileUrl = data.data.original_file_url;
+                            if (!fileUrl.startsWith('http')) {
+                                if (fileUrl.startsWith('/')) {
+                                    fileUrl = window.location.origin + basePath + fileUrl;
+                                } else {
+                                    fileUrl = new URL(fileUrl, window.location.href).href;
+                                }
+                            }
+                            console.log('PDF预览URL:', fileUrl);
+                            
+                            // 创建iframe
+                            const iframe = document.createElement('iframe');
+                            iframe.src = fileUrl;
+                            iframe.style.width = '100%';
+                            iframe.style.height = '100%';
+                            iframe.style.border = 'none';
+                            iframe.style.flex = '1';
+                            iframe.style.minHeight = '0';
+                            iframe.onload = function() {
+                                console.log('PDF iframe加载成功');
+                            };
+                            iframe.onerror = function() {
+                                console.error('PDF iframe加载失败:', fileUrl);
+                                content.innerHTML = `<p style="color: red;">PDF加载失败，请尝试<a href="${fileUrl}" target="_blank">直接打开</a></p>`;
+                            };
+                            
+                            // 清空内容并设置容器样式
+                            content.innerHTML = '';
+                            content.style.display = 'flex';
+                            content.style.flexDirection = 'column';
+                            content.style.height = '100%';
+                            content.style.minHeight = '0';
+                            content.style.padding = '0';
+                            content.appendChild(iframe);
+                        } else if (fileType === '.md' || fileType === '.txt') {
+                            // Markdown或文本文件，直接显示内容
+                            let fileUrl = data.data.original_file_url;
+                            if (!fileUrl.startsWith('http')) {
+                                if (fileUrl.startsWith('/')) {
+                                    fileUrl = window.location.origin + basePath + fileUrl;
+                                } else {
+                                    fileUrl = new URL(fileUrl, window.location.href).href;
+                                }
+                            }
+                            const fetchFunc = typeof authenticatedFetch !== 'undefined' ? authenticatedFetch : (window.authenticatedFetch || async function(url, options = {}) {
+                                const token = (typeof getAccessToken !== 'undefined' ? getAccessToken() : (window.getAccessToken ? window.getAccessToken() : localStorage.getItem('access_token') || ''));
+                                const headers = {
+                                    'Authorization': `Bearer ${token}`,
+                                    ...options.headers
+                                };
+                                return fetch(url, { ...options, headers });
+                            });
+                            const response = await fetchFunc(fileUrl);
+                            const text = await response.text();
+                            content.innerHTML = `<pre style="white-space: pre-wrap; word-wrap: break-word;">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
+                        } else {
+                            // 其他文件类型提供下载链接
+                            let fileUrl = data.data.original_file_url;
+                            if (!fileUrl.startsWith('http')) {
+                                if (fileUrl.startsWith('/')) {
+                                    fileUrl = window.location.origin + basePath + fileUrl;
+                                } else {
+                                    fileUrl = new URL(fileUrl, window.location.href).href;
+                                }
+                            }
+                            content.innerHTML = `<p>文件类型: ${fileType}</p><p><a href="${fileUrl}" target="_blank" download>点击下载原文件</a></p>`;
+                        }
+                    } else if (data.data.content) {
+                        // Markdown内容预览
+                        content.innerHTML = parseMarkdown(data.data.content);
+                    } else {
+                        content.innerHTML = '<p>无法预览此文档</p>';
+                    }
+                } else {
+                    throw new Error(data.message || '预览失败');
+                }
+            } catch (error) {
+                console.error('预览文档失败:', error);
+                content.innerHTML = `<p style="color: red;">预览失败: ${error.message}</p>`;
+            }
+        }
+
+        // 关闭预览
+        function closePreview() {
+            const modal = document.getElementById('previewModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // 初始化预览框调整大小功能
+        function initPreviewResize() {
+            const modalContent = document.getElementById('previewModalContent');
+            if (!modalContent) return;
+            
+            let isResizing = false;
+            let resizeType = '';
+            let startX = 0;
+            let startY = 0;
+            let startWidth = 0;
+            let startHeight = 0;
+            let startLeft = 0;
+            let startTop = 0;
+            
+            // 获取调整手柄
+            const handleRight = modalContent.querySelector('.modal-resize-handle-right');
+            const handleTop = modalContent.querySelector('.modal-resize-handle-top');
+            const handleBottom = modalContent.querySelector('.modal-resize-handle-bottom');
+            
+            // 开始调整大小
+            function startResize(e, type) {
+                isResizing = true;
+                resizeType = type;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = modalContent.getBoundingClientRect();
+                startWidth = rect.width;
+                startHeight = rect.height;
+                startLeft = rect.left;
+                startTop = rect.top;
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            // 调整大小
+            function doResize(e) {
+                if (!isResizing) return;
+                
+                const deltaX = e.clientX - startX;
+                const deltaY = e.clientY - startY;
+                
+                if (resizeType === 'left') {
+                    const newWidth = startWidth - deltaX;
+                    if (newWidth >= 400 && newWidth <= window.innerWidth * 0.95) {
+                        modalContent.style.width = newWidth + 'px';
+                        modalContent.style.marginLeft = (startLeft + deltaX) + 'px';
+                    }
+                } else if (resizeType === 'right') {
+                    const newWidth = startWidth + deltaX;
+                    if (newWidth >= 400 && newWidth <= window.innerWidth * 0.95) {
+                        modalContent.style.width = newWidth + 'px';
+                    }
+                } else if (resizeType === 'top') {
+                    const newHeight = startHeight - deltaY;
+                    if (newHeight >= 300 && newHeight <= window.innerHeight * 0.95) {
+                        modalContent.style.height = newHeight + 'px';
+                        modalContent.style.marginTop = (startTop + deltaY) + 'px';
+                    }
+                } else if (resizeType === 'bottom') {
+                    const newHeight = startHeight + deltaY;
+                    if (newHeight >= 300 && newHeight <= window.innerHeight * 0.95) {
+                        modalContent.style.height = newHeight + 'px';
+                    }
+                }
+            }
+            
+            // 停止调整大小
+            function stopResize() {
+                isResizing = false;
+                resizeType = '';
+            }
+            
+            // 绑定事件
+            if (handleRight) {
+                handleRight.addEventListener('mousedown', (e) => startResize(e, 'right'));
+            }
+            if (handleTop) {
+                handleTop.addEventListener('mousedown', (e) => startResize(e, 'top'));
+            }
+            if (handleBottom) {
+                handleBottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
+            }
+            
+            // 检测鼠标在边框附近时改变光标
+            modalContent.addEventListener('mousemove', (e) => {
+                if (isResizing) return;
+                const rect = modalContent.getBoundingClientRect();
+                const leftEdge = e.clientX - rect.left;
+                const rightEdge = rect.right - e.clientX;
+                const topEdge = e.clientY - rect.top;
+                const bottomEdge = rect.bottom - e.clientY;
+                
+                if (leftEdge <= 4 && leftEdge >= 0) {
+                    modalContent.style.cursor = 'ew-resize';
+                } else if (rightEdge <= 4 && rightEdge >= 0) {
+                    modalContent.style.cursor = 'ew-resize';
+                } else if (topEdge <= 4 && topEdge >= 0) {
+                    modalContent.style.cursor = 'ns-resize';
+                } else if (bottomEdge <= 4 && bottomEdge >= 0) {
+                    modalContent.style.cursor = 'ns-resize';
+                } else {
+                    modalContent.style.cursor = 'default';
+                }
+            });
+            
+            // 左侧调整
+            modalContent.addEventListener('mousedown', (e) => {
+                if (isResizing) return;
+                const rect = modalContent.getBoundingClientRect();
+                const leftEdge = e.clientX - rect.left;
+                if (leftEdge <= 4 && leftEdge >= 0) {
+                    startResize(e, 'left');
+                }
+            });
+            
+            // 全局事件
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+        }
+
+        // 点击模态框外部关闭
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('previewModal');
+            if (event.target === modal) {
+                closePreview();
+            }
+        });
     </script>
 </body>
 </html>

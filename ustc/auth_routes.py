@@ -1033,11 +1033,11 @@ async def login_page():
                             return response.json().then(user => {
                                 // 已登录，根据角色跳转
                                 console.log('登录页面 - token有效，用户角色:', user.role);
-                                // 使用 replace 而不是 href，避免在历史记录中留下记录
+                            // 使用 replace 而不是 href，避免在历史记录中留下记录
                                 if (user.role === 'admin') {
                                     window.location.replace(getBasePath() + '/auth/admin');
                                 } else {
-                                    window.location.replace(getBasePath() + '/');
+                            window.location.replace(getBasePath() + '/');
                                 }
                             });
                         } else {
@@ -1059,8 +1059,8 @@ async def login_page():
                 } else {
                     if (hasError) {
                         console.log('登录页面 - URL中有error参数，不自动跳转');
-                    } else {
-                        console.log('登录页面 - 没有token，不做任何操作，保持在登录页面');
+                } else {
+                    console.log('登录页面 - 没有token，不做任何操作，保持在登录页面');
                     }
                 }
             });

@@ -28,6 +28,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/ustc.svg",  # SVG文件不需要认证
             "/nsrlchat/ustc.svg",  # 子路径SVG文件不需要认证
             "/kb/api/upload-file",  # 文件上传不需要认证
+            "/kb/api/original-file",  # 原文件下载不需要认证（用于预览）
+            "/kb/api/document",  # 文档预览API不需要认证（用于预览）
             "/agent"  # API路径不需要中间件认证（API内部会处理认证）
         ]
     

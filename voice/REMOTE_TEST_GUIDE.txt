@@ -1,0 +1,109 @@
+==========================================
+MCP 知识库搜索服务器 - 远程测试指南
+==========================================
+
+✅ 服务器已启动！
+
+服务器信息：
+  公网 IP: 114.214.168.134
+  端口: 8001
+  访问地址: http://114.214.168.134:8001
+
+==========================================
+在别的机器上测试的方法
+==========================================
+
+方法一：使用 curl 命令（最简单）
+
+1. 健康检查：
+   curl http://114.214.168.134:8001/health
+
+2. 列出工具：
+   curl http://114.214.168.134:8001/mcp/tools
+
+3. 调用 MCP 工具：
+   curl -X POST http://114.214.168.134:8001/mcp/tools/call \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "knowledge_base_search",
+       "arguments": {
+         "query": "如何配置数据库",
+         "collection_name": "nsrl_tech_docs",
+         "k": 5
+       }
+     }'
+
+4. 使用 RESTful API：
+   curl -X POST http://114.214.168.134:8001/api/search \
+     -H "Content-Type: application/json" \
+     -d '{
+       "query": "如何配置数据库",
+       "k": 5
+     }'
+
+方法二：使用 Python 脚本
+
+创建 test_remote.py：
+```python
+import requests
+
+BASE_URL = "http://114.214.168.134:8001"
+
+# 健康检查
+response = requests.get(f"{BASE_URL}/health")
+print("健康检查:", response.json())
+
+# 列出工具
+response = requests.get(f"{BASE_URL}/mcp/tools")
+print("工具列表:", response.json())
+
+# 调用工具
+response = requests.post(
+    f"{BASE_URL}/mcp/tools/call",
+    json={
+        "name": "knowledge_base_search",
+        "arguments": {
+            "query": "如何配置数据库",
+            "collection_name": "nsrl_tech_docs",
+            "k": 5
+        }
+    }
+)
+print("搜索结果:", response.json())
+```
+
+运行：
+   python3 test_remote.py
+
+方法三：使用浏览器
+
+直接在浏览器中访问：
+  - http://114.214.168.134:8001/health
+  - http://114.214.168.134:8001/mcp/tools
+
+方法四：使用测试脚本
+
+将 voice/test_remote.sh 复制到测试机器，然后：
+   chmod +x test_remote.sh
+   ./test_remote.sh 114.214.168.134 8001 "如何配置数据库"
+
+==========================================
+注意事项
+==========================================
+
+1. 防火墙：确保服务器防火墙开放了 8001 端口
+   如果无法连接，运行：
+   sudo ufw allow 8001/tcp  # Ubuntu/Debian
+   或
+   sudo firewall-cmd --permanent --add-port=8001/tcp  # CentOS/RHEL
+   sudo firewall-cmd --reload
+
+2. 网络：确保测试机器可以访问服务器的公网 IP
+
+3. 查看服务器日志：
+   tail -f /home/user/ustcchat/voice/mcp_server.log
+
+4. 停止服务器：
+   kill $(cat /home/user/ustcchat/voice/mcp_server.pid)
+
+==========================================

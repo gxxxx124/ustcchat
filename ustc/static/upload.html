@@ -569,7 +569,7 @@
         .modal {
             display: none;
             position: fixed;
-            z-index: 1000;
+            z-index: 10000;
             left: 0;
             top: 0;
             width: 100%;
@@ -583,10 +583,74 @@
             padding: 0;
             border-radius: 12px;
             width: 90%;
-            max-width: 800px;
-            max-height: 80vh;
+            max-width: 95vw;
+            min-width: 400px;
+            height: 80vh;
+            min-height: 300px;
+            max-height: 95vh;
             overflow: hidden;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            resize: both;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* 左右边框调整区域 */
+        .modal-content::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            cursor: ew-resize;
+            z-index: 10;
+        }
+        
+        .modal-resize-handle-right {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            cursor: ew-resize;
+            z-index: 10;
+        }
+        
+        /* 上下边框调整区域 */
+        .modal-resize-handle-top {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 4px;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        
+        .modal-resize-handle-bottom {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 4px;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        
+        /* 调整大小手柄样式（右下角） */
+        .modal-content::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(-45deg, transparent 30%, #cbd5e1 30%, #cbd5e1 35%, transparent 35%, transparent 65%, #cbd5e1 65%, #cbd5e1 70%, transparent 70%);
+            cursor: nwse-resize;
+            pointer-events: none;
+            z-index: 1;
         }
 
         .modal-header {
@@ -625,8 +689,11 @@
 
         .modal-body {
             padding: 1.5rem;
-            max-height: 60vh;
-            overflow-y: auto;
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0; /* 允许flex子元素缩小 */
         }
 
         .preview-content {
@@ -639,6 +706,10 @@
             border-radius: 8px;
             border: 1px solid #e5e7eb;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            overflow: auto;
         }
 
         /* Markdown内容样式优化 */
@@ -763,6 +834,13 @@
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             margin: 0.5rem 0;
+        }
+        .preview-content iframe {
+            width: 100%;
+            height: 80vh;
+            border: none;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
 
         /* 上传队列样式 */
@@ -926,6 +1004,9 @@
                 }
                 
                 const user = await response.json();
+                
+                // 存储用户信息到 localStorage，供后续使用
+                localStorage.setItem('user', JSON.stringify(user));
                 
                 // 调试：打印用户信息
                 console.log('=== 文件管理页面权限检查 ===');
@@ -1106,10 +1187,17 @@
         <div class="upload-section">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h2 class="section-title" style="margin: 0;">文档列表</h2>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn btn-sm" id="filterAllBtn" onclick="switchFilter('all')" style="background: #2563eb; color: white;">
+                        全部文件
+                    </button>
+                    <button class="btn btn-sm" id="filterMyBtn" onclick="switchFilter('my_files')" style="background: #e5e7eb; color: #374151;">
+                        我的文件
+                    </button>
                 <button class="btn btn-sm refresh-btn" onclick="loadDocuments()">
-                    <span>🔄</span>
-                    刷新
+                        <span>🔄</span> 刷新
                 </button>
+                </div>
             </div>
             <div class="document-list" id="documentList">
                 <div class="loading-state">
@@ -1122,7 +1210,10 @@
 
     <!-- 预览模态框 -->
     <div id="previewModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" id="previewModalContent">
+            <div class="modal-resize-handle-top"></div>
+            <div class="modal-resize-handle-right"></div>
+            <div class="modal-resize-handle-bottom"></div>
             <div class="modal-header">
                 <h3 class="modal-title" id="previewTitle">文档预览</h3>
                 <button class="modal-close" onclick="closePreview()">&times;</button>
@@ -1192,7 +1283,7 @@
         let selectedFiles = [];
         let uploadQueue = [];
         let isUploading = false;
-        let currentKnowledgeBase = 'NSRL技术文档库'; // 知识库名称
+        let currentKnowledgeBase = 'NSRL文档库'; // 知识库名称
 
         // 初始化页面
         document.addEventListener('DOMContentLoaded', function() {
@@ -1208,8 +1299,8 @@
                 const data = await response.json();
                 
                 if (data.success && data.data.knowledge_bases.length > 0) {
-                    // 找到NSRL技术文档库
-                    const nsrlKb = data.data.knowledge_bases.find(kb => kb.name === 'NSRL技术文档库');
+                    // 找到NSRL文档库
+                    const nsrlKb = data.data.knowledge_bases.find(kb => kb.name === 'NSRL文档库');
                     if (nsrlKb) {
                         // 更新页面显示
                         document.getElementById('currentKbName').textContent = nsrlKb.name;
@@ -1217,19 +1308,19 @@
                         document.getElementById('currentKbStatus').className = 'kb-status';
                     } else {
                         // 如果没有找到，显示默认信息
-                        document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                        document.getElementById('currentKbName').textContent = 'NSRL文档库';
                         document.getElementById('currentKbStatus').textContent = '❌ 未找到';
                         document.getElementById('currentKbStatus').className = 'kb-status error';
                     }
                 } else {
                     // 如果API调用失败，显示默认信息
-                    document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                    document.getElementById('currentKbName').textContent = 'NSRL文档库';
                     document.getElementById('currentKbStatus').textContent = '❌ 连接失败';
                     document.getElementById('currentKbStatus').className = 'kb-status error';
                 }
             } catch (error) {
                 console.error('加载知识库信息失败:', error);
-                document.getElementById('currentKbName').textContent = 'NSRL技术文档库';
+                document.getElementById('currentKbName').textContent = 'NSRL文档库';
                 document.getElementById('currentKbStatus').textContent = '❌ 连接失败';
                 document.getElementById('currentKbStatus').className = 'kb-status error';
             }
@@ -1455,10 +1546,11 @@
             processNext();
         }
 
-        // 上传单个文件
+        // 上传单个文件（支持流式响应）
         async function uploadSingleFile(fileItem) {
             fileItem.status = 'uploading';
             fileItem.progress = 0;
+            fileItem.message = '准备上传...';
             updateUploadQueue();
 
             try {
@@ -1466,12 +1558,30 @@
                 formData.append('file', fileItem.file);
                 formData.append('knowledge_base', currentKnowledgeBase);
 
+                // 获取认证token
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    throw new Error('未找到认证token，请重新登录');
+                }
+
+                // 构建URL
+                let url = './kb/api/upload-file';
+                if (url.startsWith('./')) {
+                    url = getBasePath() + url.substring(1);
+                } else if (url.startsWith('/kb/') || url.startsWith('/auth/') || url.startsWith('/agent/')) {
+                    url = getBasePath() + url;
+                }
+
                 // 开始上传
                 fileItem.progress = 10;
+                fileItem.message = '正在上传文件...';
                 updateUploadQueue();
 
-                const response = await authenticatedFetch('./kb/api/upload-file', {
+                const response = await fetch(url, {
                     method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
                     body: formData
                 });
 
@@ -1480,61 +1590,125 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
-                // 检查响应内容类型
+                // 检查是否是流式响应
                 const contentType = response.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    const text = await response.text();
-                    throw new Error(`服务器返回了非JSON响应: ${text.substring(0, 200)}...`);
-                }
+                if (contentType && contentType.includes('text/event-stream')) {
+                    // 流式响应处理
+                    fileItem.status = 'processing';
+                    fileItem.progress = 30;
+                    fileItem.message = '文件已上传，开始处理...';
+                    updateUploadQueue();
 
-                // 上传完成，开始处理
-                fileItem.status = 'processing';
-                fileItem.progress = 50;
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || ''; // 保留最后一个不完整的行
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+                                    
+                                    // 更新状态和消息
+                                    if (data.status) {
+                                        fileItem.status = data.status === 'completed' ? 'completed' : 
+                                                         data.status === 'error' ? 'error' : 
+                                                         data.status === 'saving' ? 'uploading' : 'processing';
+                                        fileItem.message = data.message || fileItem.message;
+                                        
+                                        // 更新进度
+                                        if (data.status === 'saving') {
+                                            fileItem.progress = 20;
+                                        } else if (data.status === 'processing') {
+                                            fileItem.progress = Math.min(fileItem.progress + 5, 90);
+                                        } else if (data.status === 'completed') {
+                                            fileItem.progress = 100;
+                                        }
+                                        
                 updateUploadQueue();
+                                    }
 
+                                    // 处理完成或错误
+                                    if (data.status === 'completed' && data.success) {
+                                        showStatus(`文件 ${fileItem.file.name} 处理完成`, 'success');
+                                        addUploadResult(fileItem.file.name, true, data.message || '上传成功');
+                                        loadDocuments(); // 上传成功后刷新文档列表
+                                        
+                                        setTimeout(() => {
+                                            removeFileFromQueue(fileItem.id);
+                                        }, 3000);
+                                        return;
+                                    } else if (data.status === 'error' || (data.success === false)) {
+                                        fileItem.status = 'error';
+                                        fileItem.progress = 100;
+                                        fileItem.message = data.message || '处理失败';
+                                        updateUploadQueue();
+                                        
+                                        showStatus(`处理失败: ${data.message}`, 'error');
+                                        addUploadResult(fileItem.file.name, false, data.message);
+                                        
+                                        setTimeout(() => {
+                                            removeFileFromQueue(fileItem.id);
+                                        }, 3000);
+                                        return;
+                                    }
+                                } catch (e) {
+                                    console.error('解析SSE数据失败:', e, line);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 非流式响应（兼容旧版本）
                 const result = await response.json();
 
                 if (result.success) {
-                    // 真正处理完成
                     fileItem.status = 'completed';
                     fileItem.progress = 100;
+                        fileItem.message = result.message || '上传成功';
                     updateUploadQueue();
                     
                     showStatus(`文件 ${fileItem.file.name} 处理完成`, 'success');
-                    addUploadResult(fileItem.file.name, true, '上传成功');
-                    loadDocuments(); // 上传成功后刷新文档列表
+                        addUploadResult(fileItem.file.name, true, result.message || '上传成功');
+                        loadDocuments();
                     
-                    // 延迟从队列中移除已完成的文件，让用户看到完成状态
                     setTimeout(() => {
                         removeFileFromQueue(fileItem.id);
-                    }, 3000); // 3秒后移除
+                        }, 3000);
                 } else {
-                    // 处理失败
                     fileItem.status = 'error';
                     fileItem.progress = 100;
+                        fileItem.message = result.message || '处理失败';
                     updateUploadQueue();
                     
                     showStatus(`处理失败: ${result.message}`, 'error');
                     addUploadResult(fileItem.file.name, false, result.message);
                     
-                    // 延迟从队列中移除失败的文件，让用户看到失败状态
                     setTimeout(() => {
                         removeFileFromQueue(fileItem.id);
-                    }, 3000); // 3秒后移除
+                        }, 3000);
+                    }
                 }
             } catch (error) {
                 // 网络错误或其他异常
                 fileItem.status = 'error';
                 fileItem.progress = 100;
+                fileItem.message = error.message || '处理失败';
                 updateUploadQueue();
                 
                 showStatus(`处理失败: ${error.message}`, 'error');
                 addUploadResult(fileItem.file.name, false, error.message);
                 
-                // 延迟从队列中移除失败的文件，让用户看到失败状态
                 setTimeout(() => {
                     removeFileFromQueue(fileItem.id);
-                }, 3000); // 3秒后移除
+                }, 3000);
             }
         }
 
@@ -1572,6 +1746,7 @@
                               item.status === 'completed' ? '✅ 已完成' : '❌ 失败'}
                         </span>
                     </div>
+                    ${item.message ? `<div class="queue-message" style="font-size: 0.85em; color: #6b7280; margin-top: 0.25rem;">${item.message}</div>` : ''}
                     <div class="queue-progress">
                         <div class="queue-progress-fill" style="width: ${item.progress}%"></div>
                     </div>
@@ -1583,22 +1758,117 @@
         }
 
         // 预览文档
-        async function previewDocument(documentName) {
+        async function previewDocument(documentName, event) {
+            // 阻止默认行为和事件冒泡
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            console.log('预览文档:', documentName);
             const modal = document.getElementById('previewModal');
             const title = document.getElementById('previewTitle');
             const content = document.getElementById('previewContent');
+            
+            if (!modal) {
+                console.error('预览模态框不存在');
+                return false;
+            }
             
             title.textContent = `预览: ${documentName}`;
             content.textContent = '加载中...';
             modal.style.display = 'block';
 
+            // 初始化调整大小功能
+            setTimeout(initPreviewResize, 100);
+
             try {
-                const response = await authenticatedFetch(`./kb/api/document/${encodeURIComponent(currentKnowledgeBase)}/${encodeURIComponent(documentName)}/preview`);
+                // 构建预览API URL，确保使用正确的路径
+                const previewUrl = `${getBasePath()}/kb/api/document/${encodeURIComponent(currentKnowledgeBase)}/${encodeURIComponent(documentName)}/preview`;
+                console.log('预览API URL:', previewUrl);
+                const response = await authenticatedFetch(previewUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 const data = await response.json();
+                console.log('预览API响应:', data);
 
                 if (data.success) {
-                    // 使用Markdown解析器渲染内容
+                    // 检查是否是原文件预览
+                    if (data.data.content_type === 'original_file' && data.data.original_file_url) {
+                        // 原文件预览（PDF等）
+                        const fileType = data.data.file_type || '';
+                        if (fileType === '.pdf') {
+                            // PDF文件使用iframe预览
+                            // 确保URL是绝对路径，考虑子路径部署
+                            let fileUrl = data.data.original_file_url;
+                            if (!fileUrl.startsWith('http')) {
+                                if (fileUrl.startsWith('/')) {
+                                    // 使用 getBasePath() 函数获取基础路径
+                                    const basePath = getBasePath();
+                                    // 构建完整URL
+                                    fileUrl = window.location.origin + basePath + fileUrl;
+                                } else {
+                                    // 相对路径，使用当前路径
+                                    fileUrl = new URL(fileUrl, window.location.href).href;
+                                }
+                            }
+                            console.log('PDF预览URL:', fileUrl);
+                            console.log('原始URL:', data.data.original_file_url);
+                            console.log('basePath:', getBasePath());
+                            // 创建iframe并添加加载事件监听
+                            const iframe = document.createElement('iframe');
+                            iframe.src = fileUrl;
+                            iframe.style.width = '100%';
+                            iframe.style.height = '100%';
+                            iframe.style.border = 'none';
+                            iframe.style.flex = '1';
+                            iframe.style.minHeight = '0';
+                            iframe.onload = function() {
+                                console.log('PDF iframe加载成功');
+                            };
+                            iframe.onerror = function() {
+                                console.error('PDF iframe加载失败:', fileUrl);
+                                content.innerHTML = `<p style="color: red;">PDF加载失败，请尝试<a href="${fileUrl}" target="_blank">直接打开</a></p>`;
+                            };
+                            // 设置超时检查
+                            setTimeout(() => {
+                                try {
+                                    if (iframe.contentDocument === null || iframe.contentDocument.body === null) {
+                                        console.warn('iframe可能未加载完成');
+                                    }
+                                } catch (e) {
+                                    // 跨域检查会抛出异常，这是正常的
+                                    console.log('iframe跨域检查（正常）:', e.message);
+                                }
+                            }, 3000);
+                            // 清空内容并设置容器样式以支持自适应
+                            content.innerHTML = '';
+                            content.style.display = 'flex';
+                            content.style.flexDirection = 'column';
+                            content.style.height = '100%';
+                            content.style.minHeight = '0';
+                            content.style.padding = '0';
+                            content.appendChild(iframe);
+                        } else {
+                            // 其他文件类型提供下载链接
+                            let fileUrl = data.data.original_file_url;
+                            if (!fileUrl.startsWith('http')) {
+                                if (fileUrl.startsWith('/')) {
+                                    const basePath = getBasePath();
+                                    fileUrl = window.location.origin + basePath + fileUrl;
+                                } else {
+                                    fileUrl = new URL(fileUrl, window.location.href).href;
+                                }
+                            }
+                            content.innerHTML = `<p>原文件类型: ${fileType}</p><p><a href="${fileUrl}" target="_blank" download>点击下载原文件</a></p>`;
+                        }
+                    } else if (data.data.content) {
+                        // Markdown内容预览
                     content.innerHTML = marked.parse(data.data.content);
+                    } else {
+                        content.textContent = '预览内容为空';
+                    }
                 } else {
                     content.textContent = `预览失败: ${data.message}`;
                 }
@@ -1606,6 +1876,8 @@
                 console.error('预览失败:', error);
                 content.textContent = `预览失败: ${error.message}`;
             }
+            
+            return false;
         }
 
         // 关闭预览
@@ -1613,6 +1885,131 @@
             const modal = document.getElementById('previewModal');
             modal.style.display = 'none';
         }
+        
+        // 初始化预览框调整大小功能
+        function initPreviewResize() {
+            const modalContent = document.getElementById('previewModalContent');
+            if (!modalContent) return;
+            
+            let isResizing = false;
+            let resizeType = '';
+            let startX = 0;
+            let startY = 0;
+            let startWidth = 0;
+            let startHeight = 0;
+            let startLeft = 0;
+            let startTop = 0;
+            
+            // 开始调整大小
+            function startResize(e, type) {
+                isResizing = true;
+                resizeType = type;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = modalContent.getBoundingClientRect();
+                startWidth = rect.width;
+                startHeight = rect.height;
+                startLeft = rect.left;
+                startTop = rect.top;
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            // 调整大小
+            function doResize(e) {
+                if (!isResizing) return;
+                
+                const deltaX = e.clientX - startX;
+                const deltaY = e.clientY - startY;
+                
+                if (resizeType === 'left') {
+                    const newWidth = startWidth - deltaX;
+                    if (newWidth >= 400 && newWidth <= window.innerWidth * 0.95) {
+                        modalContent.style.width = newWidth + 'px';
+                        modalContent.style.marginLeft = (startLeft + deltaX) + 'px';
+                    }
+                } else if (resizeType === 'right') {
+                    const newWidth = startWidth + deltaX;
+                    if (newWidth >= 400 && newWidth <= window.innerWidth * 0.95) {
+                        modalContent.style.width = newWidth + 'px';
+                    }
+                } else if (resizeType === 'top') {
+                    const newHeight = startHeight - deltaY;
+                    if (newHeight >= 300 && newHeight <= window.innerHeight * 0.95) {
+                        modalContent.style.height = newHeight + 'px';
+                        modalContent.style.marginTop = (startTop + deltaY) + 'px';
+                    }
+                } else if (resizeType === 'bottom') {
+                    const newHeight = startHeight + deltaY;
+                    if (newHeight >= 300 && newHeight <= window.innerHeight * 0.95) {
+                        modalContent.style.height = newHeight + 'px';
+                    }
+                }
+            }
+            
+            // 停止调整大小
+            function stopResize() {
+                isResizing = false;
+                resizeType = '';
+            }
+            
+            // 获取调整手柄
+            const handleRight = modalContent.querySelector('.modal-resize-handle-right');
+            const handleTop = modalContent.querySelector('.modal-resize-handle-top');
+            const handleBottom = modalContent.querySelector('.modal-resize-handle-bottom');
+            
+            // 绑定事件
+            if (handleRight) {
+                handleRight.addEventListener('mousedown', (e) => startResize(e, 'right'));
+            }
+            if (handleTop) {
+                handleTop.addEventListener('mousedown', (e) => startResize(e, 'top'));
+            }
+            if (handleBottom) {
+                handleBottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
+            }
+            
+            // 检测鼠标在边框附近时改变光标
+            modalContent.addEventListener('mousemove', (e) => {
+                if (isResizing) return;
+                const rect = modalContent.getBoundingClientRect();
+                const leftEdge = e.clientX - rect.left;
+                const rightEdge = rect.right - e.clientX;
+                const topEdge = e.clientY - rect.top;
+                const bottomEdge = rect.bottom - e.clientY;
+                
+                if (leftEdge <= 4 && leftEdge >= 0) {
+                    modalContent.style.cursor = 'ew-resize';
+                } else if (rightEdge <= 4 && rightEdge >= 0) {
+                    modalContent.style.cursor = 'ew-resize';
+                } else if (topEdge <= 4 && topEdge >= 0) {
+                    modalContent.style.cursor = 'ns-resize';
+                } else if (bottomEdge <= 4 && bottomEdge >= 0) {
+                    modalContent.style.cursor = 'ns-resize';
+                } else {
+                    modalContent.style.cursor = 'default';
+                }
+            });
+            
+            // 左侧调整
+            modalContent.addEventListener('mousedown', (e) => {
+                if (isResizing) return;
+                const rect = modalContent.getBoundingClientRect();
+                const leftEdge = e.clientX - rect.left;
+                if (leftEdge <= 4 && leftEdge >= 0) {
+                    startResize(e, 'left');
+                }
+            });
+            
+            // 全局事件
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+        }
+        
+        // 页面加载时初始化
+        window.addEventListener('load', () => {
+            setTimeout(initPreviewResize, 100);
+        });
 
         // 点击模态框外部关闭
         window.onclick = function(event) {
@@ -1694,6 +2091,29 @@
         }
 
         // 加载文档列表
+        // 当前筛选类型：'all' 或 'my_files'
+        let currentFilter = 'all';
+
+        function switchFilter(filterType) {
+            currentFilter = filterType;
+            // 更新按钮样式
+            const allBtn = document.getElementById('filterAllBtn');
+            const myBtn = document.getElementById('filterMyBtn');
+            if (filterType === 'all') {
+                allBtn.style.background = '#2563eb';
+                allBtn.style.color = 'white';
+                myBtn.style.background = '#e5e7eb';
+                myBtn.style.color = '#374151';
+            } else {
+                allBtn.style.background = '#e5e7eb';
+                allBtn.style.color = '#374151';
+                myBtn.style.background = '#2563eb';
+                myBtn.style.color = 'white';
+            }
+            // 重新加载文档列表
+            loadDocuments();
+        }
+
         async function loadDocuments() {
             const documentList = document.getElementById('documentList');
             documentList.innerHTML = `
@@ -1704,7 +2124,9 @@
             `;
 
             try {
-                const response = await authenticatedFetch(`./kb/api/knowledge-base/${encodeURIComponent(currentKnowledgeBase)}/documents`);
+                // 根据当前筛选类型添加查询参数
+                const filterParam = currentFilter === 'my_files' ? '?filter_type=my_files' : '';
+                const response = await authenticatedFetch(`./kb/api/knowledge-base/${encodeURIComponent(currentKnowledgeBase)}/documents${filterParam}`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -1745,33 +2167,49 @@
             // 处理文档数据 - 可能是字符串数组或对象数组
             const processedDocs = documents.map(doc => {
                 if (typeof doc === 'string') {
-                    return { name: doc, chunks: 0 };
+                    return { name: doc, chunks: 0, uploader_username: null };
                 }
-                return doc;
+                return {
+                    name: doc.name || doc,
+                    chunks: doc.chunks || 0,
+                    uploader_username: doc.uploader_username || null
+                };
             });
 
-            documentList.innerHTML = processedDocs.map(doc => `
+            // 获取当前用户信息
+            const currentUser = getUserInfo();
+            const currentUsername = currentUser ? currentUser.username : null;
+
+            documentList.innerHTML = processedDocs.map(doc => {
+                // 检查是否有删除权限
+                const canDelete = !doc.uploader_username || doc.uploader_username === currentUsername;
+                const deleteButtonDisabled = !canDelete ? 'disabled title="您只能删除自己上传的文件"' : '';
+                const deleteButtonStyle = !canDelete ? 'opacity: 0.5; cursor: not-allowed;' : '';
+                
+                return `
                 <div class="document-item">
                     <div class="document-info">
                         <div class="document-icon">${getDocumentIcon(doc.name)}</div>
                         <div class="document-details">
-                            <div class="document-name">${doc.name}</div>
+                            <div class="document-name" style="cursor: default; user-select: none;">${doc.name}</div>
                             <div class="document-meta">
                                 <span>类型: ${getDocumentType(doc.name)}</span>
                                 ${doc.chunks ? `<span>块数: ${doc.chunks}</span>` : ''}
+                                ${doc.uploader_username && doc.uploader_username !== currentUsername ? `<span style="color: #6b7280;">上传者: ${doc.uploader_username}</span>` : ''}
                             </div>
                         </div>
                     </div>
                     <div class="document-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="previewDocument('${doc.name}')">
+                        <button class="btn btn-sm btn-secondary" onclick="return previewDocument('${doc.name}', event);">
                             预览
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteDocument('${doc.name}')">
+                        <button class="btn btn-sm btn-danger" ${deleteButtonDisabled} style="${deleteButtonStyle}" onclick="event.preventDefault(); event.stopPropagation(); deleteDocument('${doc.name}', '${doc.uploader_username || ''}'); return false;">
                             删除
                         </button>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         // 获取文档图标
@@ -1800,8 +2238,32 @@
             return types[ext] || '未知类型';
         }
 
+        // 获取当前用户信息
+        function getUserInfo() {
+            try {
+                const userStr = localStorage.getItem('user');
+                if (userStr) {
+                    return JSON.parse(userStr);
+                }
+            } catch (e) {
+                console.error('获取用户信息失败:', e);
+            }
+            return null;
+        }
+
         // 删除文档
-        async function deleteDocument(documentName) {
+        async function deleteDocument(documentName, uploaderUsername = null) {
+            // 获取当前用户信息
+            const currentUser = getUserInfo();
+            const currentUsername = currentUser ? currentUser.username : null;
+            
+            // 权限检查：如果文档有上传者信息，且不是当前用户，直接拒绝
+            if (uploaderUsername && uploaderUsername !== currentUsername) {
+                alert('❌ 权限禁止\n\n您只能删除自己上传的文件。\n\n此文件的上传者是：' + uploaderUsername);
+                return;
+            }
+            
+            // 如果没有上传者信息，仍然允许尝试删除（向后兼容）
             if (!confirm(`确定要删除文档 "${documentName}" 吗？此操作不可撤销。`)) {
                 return;
             }

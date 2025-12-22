@@ -2,12 +2,34 @@ from typing import List
 from transformers import AutoTokenizer, AutoModel
 import torch
 from langchain.embeddings.base import Embeddings
+import os
 
 
 class QwenEmbedding(Embeddings):
-    def __init__(self, model_path: str = "/home/user/ustcchat/ustc/models/qwen_emb"):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModel.from_pretrained(model_path)
+    def __init__(self, model_path: str = "/home/user/ustcchat/ustc/models/Qwen/Qwen3-Embedding-0.6B"):
+        self.model_path = model_path
+        
+        # 检查是否是sentence-transformers格式的模型
+        if os.path.exists(os.path.join(model_path, "config_sentence_transformers.json")):
+            # 使用sentence-transformers加载（Qwen3-Embedding-0.6B）
+            try:
+                from sentence_transformers import SentenceTransformer
+                self.model = SentenceTransformer(model_path)
+                self.use_sentence_transformers = True
+                print(f"✅ 使用sentence-transformers加载模型: {model_path}")
+            except ImportError:
+                print("⚠️ sentence-transformers未安装，回退到transformers方式")
+                self.use_sentence_transformers = False
+                self._load_with_transformers()
+        else:
+            # 使用transformers加载（旧的Qwen2.5模型）
+            self.use_sentence_transformers = False
+            self._load_with_transformers()
+    
+    def _load_with_transformers(self):
+        """使用transformers加载模型"""
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        self.model = AutoModel.from_pretrained(self.model_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()  # 设置为评估模式
@@ -20,19 +42,25 @@ class QwenEmbedding(Embeddings):
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """批量文本向量化"""
-        inputs = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=1024,  # 根据模型调整最大长度
-            return_tensors="pt"
-        ).to(self.device)
+        if self.use_sentence_transformers:
+            # 使用sentence-transformers
+            embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+            return embeddings.tolist()
+        else:
+            # 使用transformers + mean pooling
+            inputs = self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                max_length=1024,  # 根据模型调整最大长度
+                return_tensors="pt"
+            ).to(self.device)
 
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            embeddings = self._mean_pooling(outputs, inputs['attention_mask'])
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                embeddings = self._mean_pooling(outputs, inputs['attention_mask'])
 
-        return embeddings.tolist()
+            return embeddings.tolist()
 
     def embed_query(self, text: str) -> List[float]:
         """单个查询文本向量化"""

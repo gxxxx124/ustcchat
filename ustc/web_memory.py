@@ -1,5 +1,5 @@
 from enum import Enum
-from fastapi import FastAPI, HTTPException, status, APIRouter, UploadFile, File, Form, Depends, Request
+from fastapi import FastAPI, HTTPException, status, APIRouter, UploadFile, File, Form, Depends, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +10,9 @@ import uuid
 import logging
 from contextlib import asynccontextmanager, contextmanager
 import os
+from dotenv import load_dotenv
+# 加载 .env 文件
+load_dotenv()
 import requests
 import tempfile
 import shutil
@@ -88,11 +91,55 @@ chat_logger.setLevel(logging.INFO)
 # 防止日志传播到父级logger，避免重复输出
 chat_logger.propagate = False
 
-# 创建对话日志文件处理器
+# 创建对话日志文件处理器 - 按天分割
 import os
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-chat_file_handler = logging.FileHandler(os.path.join(log_dir, "chat_flow.log"), encoding='utf-8')
+
+# 自定义按天分割的日志处理器，文件名格式为 chat_flow_YYYYMMDD.log
+class DailyRotatingFileHandler(logging.FileHandler):
+    """自定义按天分割的日志处理器，文件名格式为 chat_flow_YYYYMMDD.log"""
+    def __init__(self, base_filename, encoding='utf-8'):
+        self.base_filename = base_filename
+        self.current_date = None
+        self.current_file = None
+        self.encoding = encoding
+        # 先计算当前文件名
+        today = datetime.datetime.now().strftime('%Y%m%d')
+        self.current_file = self.base_filename.replace('.log', f'_{today}.log')
+        self.current_date = today
+        # 然后调用父类初始化
+        super().__init__(self.current_file, mode='a', encoding=encoding)
+    
+    def _update_filename(self):
+        """更新当前日志文件名"""
+        today = datetime.datetime.now().strftime('%Y%m%d')
+        if self.current_date != today:
+            # 文件名格式：chat_flow_20251122.log
+            new_filename = self.base_filename.replace('.log', f'_{today}.log')
+            if self.current_file != new_filename:
+                # 如果文件已打开，先关闭
+                if hasattr(self, 'stream') and self.stream:
+                    self.stream.close()
+                    self.stream = None
+                self.current_file = new_filename
+                self.current_date = today
+                # 重新打开新文件
+                if self.current_file:
+                    self.baseFilename = self.current_file
+                    self.stream = self._open()
+    
+    def emit(self, record):
+        """发送日志记录"""
+        # 检查日期是否变化
+        self._update_filename()
+        super().emit(record)
+
+# 使用自定义的 DailyRotatingFileHandler 实现按天分割日志
+chat_file_handler = DailyRotatingFileHandler(
+    base_filename=os.path.join(log_dir, "chat_flow.log"),
+    encoding='utf-8'
+)
 chat_file_handler.setFormatter(logging.Formatter("%(asctime)s [CHAT] %(message)s"))
 chat_logger.addHandler(chat_file_handler)
 
@@ -216,6 +263,12 @@ class GPUResourceManager:
             model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-v3")  # DeepSeek 模型名称
             # ================================================
             
+            # 验证 API Key
+            if not api_key or api_key.strip() == "":
+                error_msg = "❌ DEEPSEEK_API_KEY 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY 环境变量。"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
             # 注意：NSRL API的端点是 /portal/api/ask，但ChatOpenAI默认会在api_base后追加/chat/completions
             # 所以我们需要使用自定义的NSRLDeepSeekChat客户端来正确处理路径
             
@@ -246,11 +299,11 @@ class GPUResourceManager:
         return self.model_instances["embedding"]
     
     def get_ocr_model(self):
-        """获取OCR模型（按需加载）"""
+        """获取OCR模型（按需加载）- 使用 DeepSeek OCR"""
         if "ocr" not in self.model_instances:
-            # 由于原始代码中没有显示具体实现，我们只返回初始化函数
-            from marker_pdf_converter import convert_pdf_to_markdown_with_marker
-            self.model_instances["ocr"] = convert_pdf_to_markdown_with_marker
+            # 使用 DeepSeek OCR
+            from deepseek_pdf2md import pdf2md
+            self.model_instances["ocr"] = pdf2md
         return self.model_instances["ocr"]
 
 # 创建全局GPU资源管理器
@@ -323,6 +376,10 @@ OSS_BUCKET = os.getenv("OSS_BUCKET", "")
 LOCAL_DIR = "/home/user/ustcchat/oss"
 os.makedirs(LOCAL_DIR, exist_ok=True)
 
+# 原文件本地存储目录
+ORIGINAL_FILES_DIR = "/home/user/ustcchat/original_files"
+os.makedirs(ORIGINAL_FILES_DIR, exist_ok=True)
+
 # ======================
 # 创建路由
 # ======================
@@ -352,8 +409,13 @@ def get_technical_name(display_name: str) -> str:
 # ======================
 # 共享工具函数
 # ======================
-def get_current_knowledge_base_info(kb_name: str):
-    """只获取指定知识库的文档信息（不包含其他知识库）"""
+def get_current_knowledge_base_info(kb_name: str, filter_username: Optional[str] = None):
+    """只获取指定知识库的文档信息（不包含其他知识库）
+    
+    Args:
+        kb_name: 知识库名称
+        filter_username: 如果提供，只返回该用户上传的文件
+    """
     global qdrant_client
     try:
         # 使用全局Qdrant客户端
@@ -386,22 +448,49 @@ def get_current_knowledge_base_info(kb_name: str):
             if not next_offset:
                 break
             offset = next_offset
-        # 提取唯一文档名
-        document_names = set()
+        
+        # 如果指定了用户名，筛选该用户上传的文件
+        if filter_username:
+            filtered_points = []
+            for point in all_points:
+                try:
+                    # 检查metadata中是否有uploader_username字段
+                    if "metadata" in point.payload:
+                        metadata = point.payload["metadata"]
+                        # 检查是否有uploader_username字段且匹配
+                        if metadata.get("uploader_username") == filter_username:
+                            filtered_points.append(point)
+                except Exception as e:
+                    logger.warning(f"处理点时出错: {str(e)}")
+            all_points = filtered_points
+        
+        # 提取文档信息（包含文档名和上传者）
+        document_info = {}  # {document_name: {uploader_username: ..., chunks: ...}}
         for point in all_points:
             try:
                 # 尝试访问source字段
                 if "metadata" in point.payload and "source" in point.payload["metadata"]:
-                    document_names.add(point.payload["metadata"]["source"])
+                    source = point.payload["metadata"]["source"]
+                    if source not in document_info:
+                        document_info[source] = {
+                            "name": source,
+                            "uploader_username": point.payload["metadata"].get("uploader_username"),
+                            "chunks": 0
+                        }
+                    document_info[source]["chunks"] += 1
             except Exception as e:
                 logger.warning(f"处理点时出错: {str(e)}")
+        
+        # 转换为列表格式（保持向后兼容）
+        documents = list(document_info.values())
+        
         return {
             "name": kb_name,
             "display_name": get_display_name(kb_name),
             "exists": True,
             "points_count": len(all_points),
-            "documents": list(document_names),
-            "document_count": len(document_names)
+            "documents": documents,  # 现在返回对象列表而不是字符串列表
+            "document_count": len(documents)
         }
     except Exception as e:
         logger.error(f"获取知识库信息失败: {str(e)}", exc_info=True)
@@ -505,8 +594,14 @@ def extract_highest_similarity(tool_response: str) -> float:
         return 0.0
 
 
-def process_uploaded_file(file: UploadFile, knowledge_base: str) -> Dict[str, Any]:
-    """处理上传的文件并添加到知识库"""
+def process_uploaded_file(file: UploadFile, knowledge_base: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
+    """处理上传的文件并添加到知识库 - 保存所有原文件
+    
+    Args:
+        file: 上传的文件
+        knowledge_base: 知识库名称
+        uploader_username: 上传者用户名（可选）
+    """
     try:
         # 创建临时文件
         temp_dir = tempfile.mkdtemp()
@@ -522,17 +617,68 @@ def process_uploaded_file(file: UploadFile, knowledge_base: str) -> Dict[str, An
         
         logger.info(f"文件已保存到临时路径: {temp_file_path}")
         
+        # 保存原文件到本地目录（所有文件类型都保存）
+        original_file_saved = False
+        original_file_path = None
+        try:
+            # 创建知识库目录
+            kb_original_dir = os.path.join(ORIGINAL_FILES_DIR, knowledge_base)
+            os.makedirs(kb_original_dir, exist_ok=True)
+            
+            # 保存原文件到本地
+            local_original_path = os.path.join(kb_original_dir, safe_filename)
+            shutil.copy2(temp_file_path, local_original_path)
+            logger.info(f"✅ 原文件已保存到本地: {local_original_path}")
+            original_file_saved = True
+            # 存储相对路径，方便后续访问
+            original_file_path = f"original_files/{knowledge_base}/{safe_filename}"
+        except Exception as save_error:
+            logger.warning(f"⚠️ 保存原文件到本地失败: {str(save_error)}")
+        
         # 根据文件类型处理
-        if file_extension in ['.pdf', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']:
+        if file_extension == '.pdf':
+            # PDF 文件优先使用 DeepSeek OCR
+            try:
+                logger.info(f"🔄 使用 DeepSeek OCR 处理 PDF: {file.filename}")
+                result = process_pdf_file(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+                if result.get("success"):
+                    result["data"]["original_file_saved"] = original_file_saved
+                    result["data"]["original_file_path"] = original_file_path
+                return result
+            except Exception as deepseek_error:
+                logger.warning(f"⚠️ DeepSeek OCR 失败，尝试 marker: {str(deepseek_error)}")
+                try:
+                    logger.info(f"🔄 使用 marker 转换器处理文档: {file.filename}")
+                    result = process_document_with_marker(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+                    if result.get("success"):
+                        result["data"]["original_file_saved"] = original_file_saved
+                        result["data"]["original_file_path"] = original_file_path
+                    return result
+                except Exception as marker_error:
+                    logger.error(f"❌ marker 转换也失败: {str(marker_error)}")
+                    return {
+                        "success": False,
+                        "message": f"PDF转换失败。DeepSeek OCR错误: {str(deepseek_error)}。Marker错误: {str(marker_error)}",
+                        "data": {"filename": file.filename}
+                    }
+        elif file_extension in ['.docx', '.ppt', '.pptx', '.xls', '.xlsx']:
             # 其他格式优先使用marker转换器，轻量级转换器作为备用
             try:
                 logger.info(f"🔄 使用marker转换器处理文档: {file.filename}")
-                return process_document_with_marker(temp_file_path, knowledge_base, file.filename)
+                result = process_document_with_marker(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+                if result.get("success"):
+                    result["data"]["original_file_saved"] = original_file_saved
+                    result["data"]["original_file_path"] = original_file_path
+                return result
             except Exception as marker_error:
                 logger.warning(f"⚠️ marker转换失败，尝试轻量级转换器: {str(marker_error)}")
                 try:
                     logger.info(f"🔄 尝试使用轻量级转换器处理文档: {file.filename}")
-                    return process_document_file(temp_file_path, knowledge_base, file.filename)
+                    result = process_document_file(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+                    if result.get("success"):
+                        result["data"]["original_file_saved"] = original_file_saved
+                        result["data"]["original_file_path"] = original_file_path
+                    return result
                 except Exception as lightweight_error:
                     logger.error(f"❌ 轻量级转换也失败: {str(lightweight_error)}")
                     return {
@@ -541,14 +687,27 @@ def process_uploaded_file(file: UploadFile, knowledge_base: str) -> Dict[str, An
                         "data": {"filename": file.filename}
                     }
         elif file_extension in ['.md', '.markdown']:
-            return process_markdown_file(temp_file_path, knowledge_base, file.filename)
+            result = process_markdown_file(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+            if result.get("success"):
+                result["data"]["original_file_saved"] = original_file_saved
+                result["data"]["original_file_path"] = original_file_path
+            return result
         elif file_extension == '.txt':
-            return process_text_file(temp_file_path, knowledge_base, file.filename)
+            result = process_text_file(temp_file_path, knowledge_base, file.filename, uploader_username=uploader_username)
+            if result.get("success"):
+                result["data"]["original_file_saved"] = original_file_saved
+                result["data"]["original_file_path"] = original_file_path
+            return result
         else:
+            # 即使是不支持转换的格式，也保存原文件
             return {
                 "success": False,
-                "message": f"不支持的文件格式: {file_extension}。支持的格式: PDF, Word(.docx), PowerPoint, Excel, Markdown, TXT",
-                "data": {"filename": file.filename}
+                "message": f"不支持的文件格式: {file_extension}。支持的格式: PDF, Word(.docx), PowerPoint, Excel, Markdown, TXT。原文件已保存到本地。" if original_file_saved else f"不支持的文件格式: {file_extension}。支持的格式: PDF, Word(.docx), PowerPoint, Excel, Markdown, TXT",
+                "data": {
+                    "filename": file.filename,
+                    "original_file_saved": original_file_saved,
+                    "original_file_path": original_file_path
+                }
             }
     
     except Exception as e:
@@ -569,9 +728,19 @@ def process_uploaded_file(file: UploadFile, knowledge_base: str) -> Dict[str, An
             logger.warning(f"清理临时文件失败: {str(e)}")
 
 
-def process_document_with_marker(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
+def process_document_with_marker(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
     """使用独立marker进程处理多种文档格式（PDF、Word、PowerPoint、Excel）"""
     try:
+        # 在marker转换前清理GPU缓存，释放显存
+        logger.info("🧹 清理GPU缓存以释放显存...")
+        if torch.cuda.is_available():
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            cached = torch.cuda.memory_reserved(0) / 1024**3
+            logger.info(f"✅ GPU缓存已清理，当前显存: 已分配={allocated:.2f}GiB, 已缓存={cached:.2f}GiB")
+        
         # 获取文件名（去掉路径和扩展名）
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         
@@ -586,11 +755,16 @@ def process_document_with_marker(file_path: str, knowledge_base: str, filename: 
         import subprocess
         import json
         
+        # 设置环境变量，优化GPU内存分配
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        
         result = subprocess.run(
             ['/home/user/miniconda3/envs/langchain/bin/python', 'marker_standalone.py', file_path, output_dir, base_name],
+            env=env,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,  # 增加超时时间到10分钟，避免504错误
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
         
@@ -624,9 +798,27 @@ def process_document_with_marker(file_path: str, knowledge_base: str, filename: 
         if not os.path.exists(md_file_path):
             raise Exception(f"marker转换失败，未生成markdown文件。期望路径: {md_file_path}")
         
+        # 检查原文件是否已保存（在 process_uploaded_file 中已保存）
+        # 构建原文件路径
+        original_file_path = f"original_files/{knowledge_base}/{filename}"
+        local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+        original_file_saved = os.path.exists(local_original_path)
+        
         # 添加到知识库 - 使用新函数存储原文件内容
         vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_original(md_file_path, vector_store)
+        
+        # 准备原文件信息
+        original_file_info = {
+            "original_filename": filename,
+            "original_file_path": original_file_path if original_file_saved else None,
+            "file_type": os.path.splitext(filename)[1].lower()
+        }
+        
+        # 添加上传者信息
+        if uploader_username:
+            original_file_info["uploader_username"] = uploader_username
+        
+        operation_info = upsert_md_file_with_original(md_file_path, vector_store, original_file_info=original_file_info)
         
         return {
             "success": True,
@@ -634,6 +826,8 @@ def process_document_with_marker(file_path: str, knowledge_base: str, filename: 
             "data": {
                 "filename": filename,
                 "operation_info": operation_info,
+                "original_file_saved": original_file_saved,
+                "original_file_path": original_file_path if original_file_saved else None,
                 "converter_result": {
                     "file_path": file_path,
                     "output_dir": output_dir,
@@ -653,7 +847,7 @@ def process_document_with_marker(file_path: str, knowledge_base: str, filename: 
         }
 
 
-def process_document_file(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
+def process_document_file(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
     """处理多种文档格式（PDF、Word、PowerPoint、Excel）"""
     try:
         # 获取文件名（去掉路径和扩展名）
@@ -689,9 +883,26 @@ def process_document_file(file_path: str, knowledge_base: str, filename: str) ->
                 "data": {"filename": filename}
             }
         
+        # 检查原文件是否已保存
+        original_file_path = f"original_files/{knowledge_base}/{filename}"
+        local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+        original_file_saved = os.path.exists(local_original_path)
+        
         # 添加到知识库 - 使用新函数存储原文件内容
         vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_original(md_file_path, vector_store)
+        
+        # 准备原文件信息
+        original_file_info = {
+            "original_filename": filename,
+            "original_file_path": original_file_path if original_file_saved else None,
+            "file_type": os.path.splitext(filename)[1].lower()
+        }
+        
+        # 添加上传者信息
+        if uploader_username:
+            original_file_info["uploader_username"] = uploader_username
+        
+        operation_info = upsert_md_file_with_original(md_file_path, vector_store, original_file_info=original_file_info)
         
         return {
             "success": True,
@@ -699,6 +910,8 @@ def process_document_file(file_path: str, knowledge_base: str, filename: str) ->
             "data": {
                 "filename": filename,
                 "operation_info": operation_info,
+                "original_file_saved": original_file_saved,
+                "original_file_path": original_file_path if original_file_saved else None,
                 "converter_result": result["data"]
             }
         }
@@ -712,78 +925,100 @@ def process_document_file(file_path: str, knowledge_base: str, filename: str) ->
         }
 
 
-def process_pdf_file(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
-    """处理PDF文件"""
-    try:
-        # 获取文件名（去掉路径和扩展名）
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        
-        # 设置输出目录
-        output_dir = f'/home/user/ustcchat/ustc/marker_outputs/{base_name}'
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # 使用轻量级多格式转换器
-        logger.info(f"🔄 使用轻量级转换器处理文件: {file_path}")
-        from lightweight_marker_converter import convert_with_lightweight_marker
-        result = convert_with_lightweight_marker(
-            file_path=file_path,
-            output_dir=output_dir,
-            base_name=base_name
-        )
-        
-        if not result["success"]:
-            return {
-                "success": False,
-                "message": f"PDF转换失败: {result['message']}",
-                "data": {"filename": filename}
-            }
-        
-        # 生成的markdown文件路径
-        md_file_path = os.path.join(output_dir, f"{base_name}.md")
-        
-        if not os.path.exists(md_file_path):
-            return {
-                "success": False,
-                "message": f"PDF转换失败，未生成markdown文件。期望路径: {md_file_path}",
-                "data": {"filename": filename}
-            }
-        
-        # 添加到知识库 - 使用新函数存储原文件内容
-        vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_original(md_file_path, vector_store)
-        
-        return {
-            "success": True,
-            "message": f"PDF文件 {filename} 处理成功",
-            "data": {
-                "filename": filename,
-                "operation_info": operation_info,
-                "marker_result": result["data"]
-            }
-        }
+def process_pdf_file(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
+    """处理PDF文件 - 使用 DeepSeek OCR
     
-    except Exception as e:
-        logger.error(f"处理PDF文件失败: {str(e)}")
-        return {
-            "success": False,
-            "message": f"处理PDF文件失败: {str(e)}",
-            "data": {"filename": filename}
+    注意：如果DeepSeek OCR失败，此函数会抛出异常，让上层函数捕获并回退到marker转换器
+    """
+    # 获取文件名（去掉路径和扩展名）
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    
+    # 检查原文件是否已保存（在 process_uploaded_file 中已保存）
+    original_file_path = f"original_files/{knowledge_base}/{filename}"
+    local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+    original_file_saved = os.path.exists(local_original_path)
+    
+    if original_file_saved:
+        logger.info(f"✅ 原文件已存在于本地: {local_original_path}")
+    else:
+        # 如果原文件不存在，尝试保存（兼容直接调用 process_pdf_file 的情况）
+        try:
+            kb_original_dir = os.path.join(ORIGINAL_FILES_DIR, knowledge_base)
+            os.makedirs(kb_original_dir, exist_ok=True)
+            shutil.copy2(file_path, local_original_path)
+            logger.info(f"✅ 原文件已保存到本地: {local_original_path}")
+            original_file_saved = True
+        except Exception as save_error:
+            logger.warning(f"⚠️ 保存原文件到本地失败: {str(save_error)}")
+    
+    # 使用 DeepSeek OCR 转换
+    logger.info(f"🔄 使用 DeepSeek OCR 处理 PDF 文件: {file_path}")
+    from deepseek_pdf2md import pdf2md
+    
+    # DeepSeek OCR转换失败时直接抛出异常，不捕获，让上层函数处理
+    md_file_path = pdf2md(file_path)
+    
+    if not os.path.exists(md_file_path):
+        logger.error(f"❌ PDF转换失败，未生成markdown文件。期望路径: {md_file_path}")
+        # 抛出异常，让上层函数捕获并回退到marker
+        raise FileNotFoundError(f"PDF转换失败，未生成markdown文件。期望路径: {md_file_path}")
+    
+    # 添加到知识库 - 使用新函数存储原文件内容
+    vector_store = embedding_init(collection_name=knowledge_base)
+    
+    # 准备原文件信息
+    original_file_info = {
+        "original_filename": filename,
+        "original_file_path": f"original_files/{knowledge_base}/{filename}" if original_file_saved else None,
+        "file_type": "pdf"
+    }
+    
+    # 添加上传者信息
+    if uploader_username:
+        original_file_info["uploader_username"] = uploader_username
+    
+    operation_info = upsert_md_file_with_original(md_file_path, vector_store, original_file_info=original_file_info)
+    
+    return {
+        "success": True,
+        "message": f"PDF文件 {filename} 处理成功（DeepSeek OCR）",
+        "data": {
+            "filename": filename,
+            "operation_info": operation_info,
+            "original_file_saved": original_file_saved,
+            "original_file_path": f"original_files/{knowledge_base}/{filename}" if original_file_saved else None
         }
+    }
 
 
-def process_markdown_file(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
+def process_markdown_file(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
     """处理Markdown文件"""
     try:
+        # 检查原文件是否已保存
+        original_file_path = f"original_files/{knowledge_base}/{filename}"
+        local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+        original_file_saved = os.path.exists(local_original_path)
+        
         # 直接使用markdown文件
         vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_original(file_path, vector_store)
+        
+        # 准备原文件信息
+        original_file_info = {
+            "original_filename": filename,
+            "original_file_path": original_file_path if original_file_saved else None,
+            "file_type": "md"
+        }
+        
+        operation_info = upsert_md_file_with_original(file_path, vector_store, original_file_info=original_file_info)
         
         return {
             "success": True,
             "message": f"Markdown文件 {filename} 处理成功",
             "data": {
                 "filename": filename,
-                "operation_info": operation_info
+                "operation_info": operation_info,
+                "original_file_saved": original_file_saved,
+                "original_file_path": original_file_path if original_file_saved else None
             }
         }
     
@@ -796,7 +1031,7 @@ def process_markdown_file(file_path: str, knowledge_base: str, filename: str) ->
         }
 
 
-def process_word_file(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
+def process_word_file(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
     """处理Word文档"""
     try:
         # 读取Word文档内容
@@ -815,9 +1050,22 @@ def process_word_file(file_path: str, knowledge_base: str, filename: str) -> Dic
         with open(temp_md_path, 'w', encoding='utf-8') as f:
             f.write(f"# {os.path.splitext(filename)[0]}\n\n{content}")
         
+        # 检查原文件是否已保存
+        original_file_path = f"original_files/{knowledge_base}/{filename}"
+        local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+        original_file_saved = os.path.exists(local_original_path)
+        
         # 添加到知识库 - 使用新函数存储原文件内容
         vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_original(temp_md_path, vector_store)
+        
+        # 准备原文件信息
+        original_file_info = {
+            "original_filename": filename,
+            "original_file_path": original_file_path if original_file_saved else None,
+            "file_type": "docx"
+        }
+        
+        operation_info = upsert_md_file_with_original(temp_md_path, vector_store, original_file_info=original_file_info)
         
         # 清理临时文件
         os.remove(temp_md_path)
@@ -827,7 +1075,9 @@ def process_word_file(file_path: str, knowledge_base: str, filename: str) -> Dic
             "message": f"Word文档 {filename} 处理成功",
             "data": {
                 "filename": filename,
-                "operation_info": operation_info
+                "operation_info": operation_info,
+                "original_file_saved": original_file_saved,
+                "original_file_path": original_file_path if original_file_saved else None
             }
         }
     
@@ -840,7 +1090,7 @@ def process_word_file(file_path: str, knowledge_base: str, filename: str) -> Dic
         }
 
 
-def process_text_file(file_path: str, knowledge_base: str, filename: str) -> Dict[str, Any]:
+def process_text_file(file_path: str, knowledge_base: str, filename: str, uploader_username: Optional[str] = None) -> Dict[str, Any]:
     """处理纯文本文件"""
     try:
         # 读取文本内容
@@ -852,9 +1102,22 @@ def process_text_file(file_path: str, knowledge_base: str, filename: str) -> Dic
         with open(temp_md_path, 'w', encoding='utf-8') as f:
             f.write(f"# {os.path.splitext(filename)[0]}\n\n{content}")
         
+        # 检查原文件是否已保存
+        original_file_path = f"original_files/{knowledge_base}/{filename}"
+        local_original_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base, filename)
+        original_file_saved = os.path.exists(local_original_path)
+        
         # 添加到知识库，传递原始文件名
         vector_store = embedding_init(collection_name=knowledge_base)
-        operation_info = upsert_md_file_with_source(temp_md_path, vector_store, filename)
+        
+        # 准备原文件信息
+        original_file_info = {
+            "original_filename": filename,
+            "original_file_path": original_file_path if original_file_saved else None,
+            "file_type": "txt"
+        }
+        
+        operation_info = upsert_md_file_with_original(temp_md_path, vector_store, original_file_info=original_file_info)
         
         # 清理临时文件
         os.remove(temp_md_path)
@@ -864,7 +1127,9 @@ def process_text_file(file_path: str, knowledge_base: str, filename: str) -> Dic
             "message": f"文本文件 {filename} 处理成功",
             "data": {
                 "filename": filename,
-                "operation_info": operation_info
+                "operation_info": operation_info,
+                "original_file_saved": original_file_saved,
+                "original_file_path": original_file_path if original_file_saved else None
             }
         }
     
@@ -1030,8 +1295,8 @@ async def manage_knowledge_base(request: KnowledgeBaseRequest):
                     qdrant_client.create_collection(
                         collection_name=request.name,
                         vectors_config={
-                            "title": VectorParams(size=896, distance=Distance.COSINE),
-                            "content": VectorParams(size=896, distance=Distance.COSINE)
+                            "title": VectorParams(size=1024, distance=Distance.COSINE),
+                            "content": VectorParams(size=1024, distance=Distance.COSINE)
                         }
                     )
                     status = "created"
@@ -1179,6 +1444,10 @@ async def manage_knowledge_base(request: KnowledgeBaseRequest):
                     data={"name": request.name}
                 )
             
+            # 获取当前用户信息（从请求上下文获取）
+            # 注意：这里需要从请求中获取用户信息，但当前函数签名没有Request参数
+            # 暂时跳过权限检查，由前端API统一处理
+            
             # 直接调用您已有的函数
             # 不再自动添加.md后缀，因为QA对已经包含了.md后缀
             deletename = request.document_name
@@ -1248,11 +1517,21 @@ async def list_knowledge_bases():
         )
 
 @kb_router.get("/api/knowledge-base/{kb_name}/documents", response_model=KnowledgeBaseResponse)
-async def list_documents(kb_name: str):
-    """列出知识库中的文档 - 保持不变"""
+async def list_documents(kb_name: str, request: Request, filter_type: Optional[str] = None):
+    """列出知识库中的文档
+    
+    Args:
+        kb_name: 知识库名称
+        request: FastAPI Request对象，用于获取当前用户
+        filter_type: 筛选类型，可选值: 'my_files'（我的文件）或 None（全部文件）
+    """
     try:
+        # 获取当前用户信息
+        current_user = get_current_user_from_token(request)
+        uploader_username = current_user.username if current_user else None
+        
         # 仅获取当前知识库的信息
-        current_kb = get_current_knowledge_base_info(kb_name)
+        current_kb = get_current_knowledge_base_info(kb_name, filter_username=uploader_username if filter_type == 'my_files' else None)
         if not current_kb["exists"]:
             return KnowledgeBaseResponse(
                 success=False,
@@ -1266,7 +1545,9 @@ async def list_documents(kb_name: str):
                 "knowledge_base": kb_name,
                 "documents": current_kb["documents"],
                 "total": current_kb["document_count"],
-                "points_count": current_kb["points_count"]
+                "points_count": current_kb["points_count"],
+                "filter_type": filter_type,
+                "uploader_username": uploader_username
             }
         )
     except Exception as e:
@@ -1519,62 +1800,248 @@ async def upload_file(
     file: UploadFile = File(...),
     knowledge_base: str = Form(...)
 ):
-    """上传文件到知识库（支持PDF、MD、Word、TXT等格式）"""
+    """上传文件到知识库（支持PDF、MD、Word、TXT等格式）- 流式返回处理状态"""
+    
+    # 第一步：立即读取文件内容（在任何其他操作之前，避免文件被关闭）
+    file_content = None
+    original_filename = file.filename if file.filename else "unknown"
+    safe_filename = sanitize_filename(original_filename)
+    
     try:
-        # 清理文件名，防止HTTP响应头注入攻击
-        original_filename = file.filename
-        safe_filename = sanitize_filename(file.filename)
+        # 优先使用file.file同步读取（最快最可靠）
+        if hasattr(file, 'file') and file.file is not None:
+            try:
+                if hasattr(file.file, 'seek'):
+                    file.file.seek(0)
+                if hasattr(file.file, 'read'):
+                    file_content = file.file.read()
+                    logger.info(f"✅ 使用file.file同步读取成功，大小: {len(file_content) if file_content else 0} bytes")
+            except Exception as sync_error:
+                logger.warning(f"同步读取失败: {sync_error}，尝试异步读取")
+        
+        # 如果同步读取失败，尝试异步读取
+        if file_content is None:
+            try:
+                file_content = await file.read()
+                logger.info(f"✅ 使用异步读取成功，大小: {len(file_content) if file_content else 0} bytes")
+            except Exception as async_error:
+                logger.error(f"异步读取也失败: {async_error}")
+                raise
+    except Exception as read_error:
+        logger.error(f"读取文件内容失败: {str(read_error)}", exc_info=True)
+        async def error_stream():
+            yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'读取文件失败: {str(read_error)}', 'filename': safe_filename})}\n\n"
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    
+    if file_content is None or len(file_content) == 0:
+        logger.error(f"文件内容为空")
+        async def empty_stream():
+            yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': '文件内容为空', 'filename': safe_filename})}\n\n"
+        return StreamingResponse(
+            empty_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    
+    # 第二步：获取用户信息和验证（文件已读取，可以安全进行其他操作）
+    try:
+        # 获取当前用户信息
+        current_user = get_current_user_from_token(request)
+        uploader_username = current_user.username if current_user else None
         
         # 记录详细的请求信息用于调试
         logger.info(f"文件上传请求详情:")
         logger.info(f"  - 原始文件名: {original_filename}")
         logger.info(f"  - 清理后文件名: {safe_filename}")
-        logger.info(f"  - 文件大小: {file.size if hasattr(file, 'size') else 'unknown'}")
+        logger.info(f"  - 上传者: {uploader_username}")
+        logger.info(f"  - 文件大小: {len(file_content)} bytes")
         logger.info(f"  - 文件类型: {file.content_type}")
         logger.info(f"  - 知识库: {knowledge_base}")
-        logger.info(f"  - 请求URL: {request.url}")
-        logger.info(f"  - 请求头: {dict(request.headers)}")
-        logger.info(f"  - 客户端IP: {request.client.host if request.client else 'unknown'}")
-        
-        # 验证文件类型（使用原始文件名进行扩展名检查）
-        allowed_extensions = ['.pdf', '.md', '.markdown', '.docx', '.txt']
-        file_extension = os.path.splitext(original_filename)[1].lower()
-        
-        if file_extension not in allowed_extensions:
-            return {
-                "success": False,
-                "message": f"不支持的文件格式: {file_extension}。支持的格式: {', '.join(allowed_extensions)}",
-                "data": {"filename": safe_filename}
+    except Exception as e:
+        logger.error(f"处理文件上传请求失败: {str(e)}", exc_info=True)
+        async def error_stream():
+            yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'处理请求失败: {str(e)}', 'filename': safe_filename if 'safe_filename' in locals() else 'unknown'})}\n\n"
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
             }
-        
-        # 验证知识库是否存在
+        )
+    
+    async def process_and_stream():
+        """流式处理文件并返回状态更新（file_content已在外层读取）"""
         try:
-            collections = qdrant_client.get_collections()
-            collection_names = [col.name for col in collections.collections]
-            if knowledge_base not in collection_names:
-                return {
-                    "success": False,
-                    "message": f"知识库 '{knowledge_base}' 不存在",
-                    "data": {"filename": safe_filename}
-                }
+            # 发送初始状态
+            yield f"data: {json.dumps({'status': 'started', 'message': '开始处理文件...', 'filename': safe_filename})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            # 验证文件类型（使用原始文件名进行扩展名检查）
+            allowed_extensions = ['.pdf', '.md', '.markdown', '.docx', '.txt']
+            file_extension = os.path.splitext(original_filename)[1].lower()
+            
+            if file_extension not in allowed_extensions:
+                yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'不支持的文件格式: {file_extension}。支持的格式: {', '.join(allowed_extensions)}', 'filename': safe_filename})}\n\n"
+                return
+            
+            # 验证知识库是否存在
+            try:
+                collections = qdrant_client.get_collections()
+                collection_names = [col.name for col in collections.collections]
+                if knowledge_base not in collection_names:
+                    yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'知识库 \'{knowledge_base}\' 不存在', 'filename': safe_filename})}\n\n"
+                    return
+            except Exception as e:
+                logger.error(f"验证知识库失败: {str(e)}")
+                yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'验证知识库失败: {str(e)}', 'filename': safe_filename})}\n\n"
+                return
+            
+            # 保存文件到临时位置
+            yield f"data: {json.dumps({'status': 'saving', 'message': '正在保存文件...', 'filename': safe_filename})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            temp_dir = tempfile.mkdtemp()
+            temp_file_path = os.path.join(temp_dir, safe_filename)
+            
+            # 保存文件内容（使用已在外层读取的file_content）
+            with open(temp_file_path, "wb") as buffer:
+                buffer.write(file_content)
+            
+            logger.info(f"文件已保存到临时路径: {temp_file_path}")
+            
+            # 创建 UploadFile 对象用于处理
+            start_time = time.time()  # 记录开始时间
+            
+            with open(temp_file_path, "rb") as f:
+                file_obj = UploadFile(
+                    filename=safe_filename,
+                    file=f,
+                    headers={"content-type": file.content_type}
+                )
+                
+                # 根据文件类型发送不同的处理状态
+                if file_extension == '.pdf':
+                    yield f"data: {json.dumps({'status': 'processing', 'message': '正在使用 DeepSeek OCR 转换 PDF...', 'filename': safe_filename})}\n\n"
+                elif file_extension in ['.docx', '.ppt', '.pptx', '.xls', '.xlsx']:
+                    yield f"data: {json.dumps({'status': 'processing', 'message': '正在转换文档格式...', 'filename': safe_filename})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'status': 'processing', 'message': '正在处理文件...', 'filename': safe_filename})}\n\n"
+                
+                await asyncio.sleep(0.1)
+                
+                # 在线程池中执行同步处理函数，避免阻塞事件循环
+                import concurrent.futures
+                loop = asyncio.get_event_loop()
+                
+                # 执行文件处理，定期发送心跳
+                def process_with_heartbeat():
+                    """在后台线程中处理文件，主线程定期发送心跳"""
+                    return process_uploaded_file(file_obj, knowledge_base, uploader_username)
+                
+                # 创建处理任务
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                future = executor.submit(process_with_heartbeat)
+                
+                # 定期发送心跳，同时等待处理完成
+                last_heartbeat = time.time()
+                heartbeat_interval = 3  # 每3秒发送一次心跳（更频繁，避免Nginx超时）
+                last_progress_message = None
+                
+                try:
+                    while not future.done():
+                        # 检查是否需要发送心跳
+                        current_time = time.time()
+                        elapsed_time = current_time - start_time
+                        
+                        if current_time - last_heartbeat >= heartbeat_interval:
+                            # 根据已用时间发送不同的进度消息
+                            if elapsed_time < 30:
+                                progress_msg = '正在转换文档格式...'
+                            elif elapsed_time < 60:
+                                progress_msg = '正在向量化文档块，请稍候...'
+                            elif elapsed_time < 120:
+                                progress_msg = '正在索引文档，可能需要一些时间...'
+                            else:
+                                progress_msg = f'处理中，已用时 {int(elapsed_time)} 秒，请耐心等待...'
+                            
+                            # 只在消息变化时发送，避免重复
+                            if progress_msg != last_progress_message:
+                                yield f"data: {json.dumps({'status': 'processing', 'message': progress_msg, 'filename': safe_filename, 'elapsed_time': int(elapsed_time)})}\n\n"
+                                last_progress_message = progress_msg
+                            else:
+                                # 即使消息相同，也定期发送心跳，保持连接活跃
+                                yield f"data: {json.dumps({'status': 'processing', 'message': progress_msg, 'filename': safe_filename, 'elapsed_time': int(elapsed_time)})}\n\n"
+                            
+                            last_heartbeat = current_time
+                        
+                        # 等待一小段时间，避免CPU占用过高
+                        await asyncio.sleep(0.5)
+                        
+                        # 检查是否超时（最多15分钟）
+                        if elapsed_time > 900:
+                            future.cancel()
+                            yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': '处理超时（超过15分钟）', 'filename': safe_filename})}\n\n"
+                            executor.shutdown(wait=False)
+                            return
+                    
+                    # 获取处理结果
+                    result = future.result()
+                    executor.shutdown(wait=True)
+                    
+                except concurrent.futures.CancelledError:
+                    yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': '处理被取消', 'filename': safe_filename})}\n\n"
+                    executor.shutdown(wait=False)
+                    return
+                except Exception as e:
+                    logger.error(f"处理文件异常: {str(e)}", exc_info=True)
+                    yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'处理失败: {str(e)}', 'filename': safe_filename})}\n\n"
+                    executor.shutdown(wait=False)
+                    return
+                
+                # 发送最终结果
+                if result.get("success"):
+                    yield f"data: {json.dumps({'status': 'completed', 'success': True, 'message': f'文件 \'{safe_filename}\' 上传成功', 'data': result.get('data', {}), 'filename': safe_filename})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': result.get('message', '处理失败'), 'data': result.get('data', {}), 'filename': safe_filename})}\n\n"
+            
+            # 清理临时文件
+            try:
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                    os.rmdir(temp_dir)
+            except Exception as cleanup_error:
+                logger.warning(f"清理临时文件失败: {str(cleanup_error)}")
+                
         except Exception as e:
-            logger.error(f"验证知识库失败: {str(e)}")
-            return {
-                "success": False,
-                "message": f"验证知识库失败: {str(e)}",
-                "data": {"filename": safe_filename}
+            logger.error(f"文件上传流式处理出错: {str(e)}", exc_info=True)
+            yield f"data: {json.dumps({'status': 'error', 'success': False, 'message': f'上传失败: {str(e)}', 'filename': safe_filename if 'safe_filename' in locals() else 'unknown'})}\n\n"
+    
+    # 返回流式响应
+    try:
+        return StreamingResponse(
+            process_and_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # 禁用 nginx 缓冲
             }
-        
-        # 处理文件
-        result = process_uploaded_file(file, knowledge_base)
-        
-        if result["success"]:
-            logger.info(f"文件 {safe_filename} 上传成功")
-        else:
-            logger.error(f"文件 {safe_filename} 上传失败: {result['message']}")
-        
-        return result
-        
+        )
     except Exception as e:
         logger.error(f"文件上传API出错: {str(e)}", exc_info=True)
         import traceback
@@ -1608,9 +2075,13 @@ class DeleteRequest(BaseModel):
 
 # 统一删除API端点（兼容单个和批量）
 @kb_router.post("/api/delete/batch", response_model=KnowledgeBaseResponse)
-async def delete_items_batch(request: List[DeleteRequest]):
+async def delete_items_batch(request: List[DeleteRequest], http_request: Request):
     """批量删除文档或问答对（兼容单个删除）"""
     try:
+        # 获取当前用户信息
+        current_user = get_current_user_from_token(http_request)
+        uploader_username = current_user.username if current_user else None
+        
         global qdrant_client
         if not request:
             return KnowledgeBaseResponse(
@@ -1646,6 +2117,48 @@ async def delete_items_batch(request: List[DeleteRequest]):
         
         for delete_request in request:
             try:
+                # 验证删除权限：用户只能删除自己上传的文件
+                if uploader_username:
+                    # 检查文档是否属于当前用户
+                    document_name = delete_request.document_name
+                    if delete_request.delete_type == "qa_pair" and not document_name.endswith('.md'):
+                        document_name = f"{document_name}.md"
+                    
+                    # 查询文档的上传者信息
+                    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+                    filter_condition = Filter(
+                        must=[
+                            FieldCondition(
+                                key="metadata.source",
+                                match=MatchValue(value=document_name)
+                            )
+                        ]
+                    )
+                    
+                    # 获取文档的点，检查上传者
+                    points, _ = qdrant_client.scroll(
+                        collection_name=knowledge_base_name,
+                        scroll_filter=filter_condition,
+                        limit=1,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    
+                    if points:
+                        point = points[0]
+                        if "metadata" in point.payload:
+                            doc_uploader = point.payload["metadata"].get("uploader_username")
+                            # 如果文档有上传者信息，且不是当前用户，拒绝删除
+                            if doc_uploader and doc_uploader != uploader_username:
+                                failed_count += 1
+                                failed_items.append({
+                                    "document_name": delete_request.document_name,
+                                    "type": delete_request.delete_type,
+                                    "error": "无权删除此文件：您只能删除自己上传的文件"
+                                })
+                                logger.warning(f"用户 {uploader_username} 尝试删除他人文件 {document_name}（上传者: {doc_uploader}）")
+                                continue
+                
                 # 根据删除类型处理
                 if delete_request.delete_type == "qa_pair":
                     # 删除问答对：直接使用文档名作为source
@@ -1653,6 +2166,7 @@ async def delete_items_batch(request: List[DeleteRequest]):
                     if not document_name.endswith('.md'):
                         document_name = f"{document_name}.md"
                     
+                    # 删除 Qdrant 中的向量数据（问答对通常没有原文件，所以不删除本地文件）
                     operation_info = delete_by_source(document_name, vector_store)
                     deleted_items.append({
                         "document_name": document_name,
@@ -1664,7 +2178,60 @@ async def delete_items_batch(request: List[DeleteRequest]):
                     document_name = delete_request.document_name
                     # 不再自动添加.md后缀，因为新文件使用原始文件名作为source
                     
+                    # 先获取原文件路径，以便删除本地文件
+                    original_file_path = None
+                    try:
+                        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+                        filter_condition = Filter(
+                            must=[
+                                FieldCondition(
+                                    key="metadata.source",
+                                    match=MatchValue(value=document_name)
+                                )
+                            ]
+                        )
+                        points, _ = qdrant_client.scroll(
+                            collection_name=knowledge_base_name,
+                            scroll_filter=filter_condition,
+                            limit=1,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                        if points and "metadata" in points[0].payload:
+                            original_file_path = points[0].payload["metadata"].get("original_file_path")
+                    except Exception as e:
+                        logger.warning(f"获取原文件路径失败: {str(e)}")
+                    
+                    # 删除 Qdrant 中的向量数据
                     operation_info = delete_by_source(document_name, vector_store)
+                    
+                    # 删除本地原文件（如果存在）
+                    if original_file_path:
+                        try:
+                            if original_file_path.startswith("original_files/"):
+                                # 相对路径，转换为绝对路径
+                                full_local_path = os.path.join("/home/user/ustcchat", original_file_path)
+                            else:
+                                # 已经是绝对路径
+                                full_local_path = original_file_path
+                            
+                            if os.path.exists(full_local_path):
+                                os.remove(full_local_path)
+                                logger.info(f"✅ 已删除本地原文件: {full_local_path}")
+                            else:
+                                logger.warning(f"⚠️ 本地原文件不存在: {full_local_path}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ 删除本地原文件失败: {str(e)}")
+                    else:
+                        # 如果没有 original_file_path，尝试使用文档名构建路径
+                        try:
+                            local_file_path = os.path.join(ORIGINAL_FILES_DIR, knowledge_base_name, document_name)
+                            if os.path.exists(local_file_path):
+                                os.remove(local_file_path)
+                                logger.info(f"✅ 已删除本地原文件: {local_file_path}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ 删除本地原文件失败: {str(e)}")
+                    
                     deleted_items.append({
                         "document_name": document_name,
                         "type": "document",
@@ -1723,12 +2290,12 @@ async def delete_items_batch(request: List[DeleteRequest]):
 
 # 单个删除API端点（推荐使用）
 @kb_router.post("/api/delete", response_model=KnowledgeBaseResponse)
-async def delete_item_unified(request: DeleteRequest):
+async def delete_item_unified(request: DeleteRequest, http_request: Request):
     """统一删除API端点（内部调用批量接口）"""
     try:
         # 将单个请求包装成列表，调用批量接口
         batch_request = [request]
-        return await delete_items_batch(batch_request)
+        return await delete_items_batch(batch_request, http_request)
         
     except Exception as e:
         logger.error(f"统一删除失败: {str(e)}", exc_info=True)
@@ -1822,6 +2389,7 @@ class AgentState(TypedDict):
     knowledge_base_name: str  # 新增字段，用于存储当前会话使用的知识库名称
     user_document_tools: List[str]  # 新增字段，用于存储当前会话可用的用户文档工具名称
     web_search_enabled: bool  # 新增：记录web搜索是否启用
+    initial_message_count: int  # 新增：记录当前会话的起始消息索引，用于区分历史消息和当前会话消息
 
 # 4. 修改模型调用节点
 async def call_model(state: AgentState):
@@ -2000,14 +2568,46 @@ async def call_model(state: AgentState):
         has_tool_result = False
         last_tool_message = None
         
-        # 查找最近的 ToolMessage
-        for msg in reversed(messages):
-            if isinstance(msg, ToolMessage):
-                has_tool_result = True
-                last_tool_message = msg
+        # 获取当前会话的起始消息索引（如果有的话）
+        # 这样可以避免误判：只检查当前会话的消息，不检查历史消息
+        initial_message_count = state.get("initial_message_count", 0)
+        chat_logger.info(f"🔍 当前会话起始消息索引: {initial_message_count}, 总消息数: {len(messages)}")
+        
+        # 只检查当前会话的消息（从 initial_message_count 之后的消息）
+        current_session_messages = messages[initial_message_count:] if initial_message_count < len(messages) else messages
+        chat_logger.info(f"🔍 当前会话消息数: {len(current_session_messages)}")
+        chat_logger.info(f"🔍 当前会话消息类型: {[type(msg).__name__ for msg in current_session_messages]}")
+        
+        # 查找最近的 ToolMessage（只检查最后一条用户消息之后的消息）
+        # 这样可以避免误判：如果最后一条消息是用户消息，说明这是新的一轮对话，应该调用工具
+        last_user_message_index = -1
+        for i in range(len(current_session_messages) - 1, -1, -1):
+            if isinstance(current_session_messages[i], HumanMessage):
+                last_user_message_index = i
+                chat_logger.info(f"🔍 找到最后一条用户消息，索引: {i} (在current_session_messages中)")
                 break
         
-        chat_logger.info(f"🔍 检查工具调用结果 - tool_call_count: {tool_call_count}, has_tool_result: {has_tool_result}")
+        # 只检查最后一条用户消息之后的消息中是否有工具调用结果
+        if last_user_message_index >= 0:
+            messages_after_user = current_session_messages[last_user_message_index + 1:]
+            chat_logger.info(f"🔍 最后一条用户消息之后的消息数: {len(messages_after_user)}")
+            for msg in messages_after_user:
+                if isinstance(msg, ToolMessage):
+                    has_tool_result = True
+                    last_tool_message = msg
+                    chat_logger.info(f"🔍 在最后一条用户消息之后找到工具消息: {type(msg).__name__}")
+                    break
+        else:
+            # 如果没有找到用户消息，检查当前会话的所有消息（不检查历史消息）
+            chat_logger.warning(f"⚠️ 没有找到用户消息，检查当前会话的所有消息")
+            for msg in reversed(current_session_messages):
+                if isinstance(msg, ToolMessage):
+                    has_tool_result = True
+                    last_tool_message = msg
+                    chat_logger.info(f"🔍 在当前会话消息中找到工具消息: {type(msg).__name__}")
+                    break
+        
+        chat_logger.info(f"🔍 检查工具调用结果 - tool_call_count: {tool_call_count}, has_tool_result: {has_tool_result}, 最后用户消息索引: {last_user_message_index}")
         
         if has_tool_result and last_tool_message:
             # 找到了工具结果，添加系统提示强制模型基于工具结果生成最终回答
@@ -2387,10 +2987,18 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
     
     # 使用用户ID + 会话名称生成session_id，确保跨设备一致性
     if request.session_id:
-        session_id = f"user_{user_id}_{request.session_id}"
+        # 如果前端已经传入了完整的session_id（格式：user_{userId}_session_{timestamp}），直接使用
+        if request.session_id.startswith(f"user_{user_id}_"):
+            session_id = request.session_id
+            chat_logger.info(f"✅ 使用前端传入的完整session_id: {session_id}")
+        else:
+            # 如果只传入了会话名称，添加前缀
+            session_id = f"user_{user_id}_{request.session_id}"
+            chat_logger.info(f"🔧 添加前缀后的session_id: {session_id}")
     else:
         # 默认会话使用用户ID
         session_id = f"user_{user_id}_default"
+        chat_logger.info(f"🔧 使用默认session_id: {session_id}")
     
     # 处理对话ID
     conversation_id = request.conversation_id
@@ -2399,6 +3007,7 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
         conversation_id = f"conv_{user_id}_{int(time.time())}"
     
     config = {"configurable": {"thread_id": session_id}}
+    chat_logger.info(f"🔍 最终使用的session_id: {session_id}, thread_id: {config['configurable']['thread_id']}")
     
     # =============== 新增：详细日志记录 ===============
     chat_logger.info(f"🚀 开始处理聊天请求 - Session: {session_id}")
@@ -2455,7 +3064,8 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
                 "knowledge_base_name": request.knowledge_base_name,
                 "tool_call_count": 0,
                 "user_document_tools": user_document_tools_list,
-                "web_search_enabled": request.enable_web_search  # 保存web搜索开关状态
+                "web_search_enabled": request.enable_web_search,  # 保存web搜索开关状态
+                "initial_message_count": 0  # 新会话，初始消息数为0
             }
             chat_logger.info(f"🆕 新会话 - 初始状态中的web_search_enabled: {initial_state['web_search_enabled']}")
         else:
@@ -2502,10 +3112,16 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
                 "knowledge_base_name": knowledge_base_name,
                 "tool_call_count": 0,  # 每次新消息都重置工具调用次数
                 "user_document_tools": user_document_tools_list,
-                "web_search_enabled": web_search_enabled
+                "web_search_enabled": web_search_enabled,
+                "initial_message_count": len(state.values["messages"])  # 续会话，初始消息数为历史消息数
             }
         
         chat_logger.info(f"🎯 初始状态构建完成，工具数量: {len(initial_state.get('user_document_tools', []))}")
+        
+        # 记录初始消息数量，用于后续只提取当前会话的引用
+        # 使用 initial_state 中已经设置好的 initial_message_count，而不是重新计算
+        initial_message_count = initial_state.get("initial_message_count", len(initial_state.get("messages", [])))
+        chat_logger.info(f"📊 初始消息数量: {initial_message_count} (从initial_state中获取)")
         
         # 执行对话流
         chat_logger.info(f"🔄 开始执行对话流程...")
@@ -2520,6 +3136,16 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
             )
         
         chat_logger.info(f"✅ 对话流程执行完成")
+        
+        # =============== 新增：详细检查final_state中的消息 ===============
+        chat_logger.info(f"🔍 检查final_state中的消息")
+        chat_logger.info(f"📊 final_state消息总数: {len(final_state.get('messages', []))}")
+        chat_logger.info(f"📊 initial_message_count: {initial_message_count}")
+        for i, msg in enumerate(final_state.get("messages", [])):
+            msg_type = type(msg).__name__
+            msg_preview = str(msg.content)[:100] if hasattr(msg, "content") else "无内容"
+            chat_logger.info(f"  消息 {i}: {msg_type} - {msg_preview}...")
+        # =============== 新增结束 ===============
         
         # 提取最新回复
         last_msg = final_state["messages"][-1]
@@ -2578,6 +3204,83 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
         else:
             chat_logger.info(f"   ℹ️ 无工具调用")
         chat_logger.info(f"🚀 ====== 正常输出API返回内容结束 ======")
+        # =============== 新增结束 ===============
+        
+        # =============== 新增：从final_state中提取引用信息 ===============
+        references = []
+        chat_logger.info(f"🔍 开始从final_state中提取引用信息")
+        try:
+            # ToolMessage已经在文件顶部导入，不需要再次导入
+            import re
+            import json
+            
+            # 只从当前会话的消息中查找工具调用结果（排除历史消息）
+            # 只检查final_state中新增的消息（从initial_message_count之后的消息）
+            all_messages = final_state.get("messages", [])
+            current_session_messages = all_messages[initial_message_count:] if initial_message_count < len(all_messages) else all_messages
+            chat_logger.info(f"📊 总消息数: {len(all_messages)}, 初始消息数: {initial_message_count}, 当前会话消息数: {len(current_session_messages)}")
+            chat_logger.info(f"🔍 当前会话消息详情:")
+            for i, msg in enumerate(current_session_messages):
+                msg_type = type(msg).__name__
+                msg_name = getattr(msg, "name", "无name属性")
+                chat_logger.info(f"  当前会话消息 {i}: {msg_type}, name={msg_name}")
+                if isinstance(msg, ToolMessage):
+                    content_preview = str(msg.content)[:200] if hasattr(msg, "content") else "无内容"
+                    chat_logger.info(f"    工具消息内容预览: {content_preview}...")
+            
+            # 从当前会话的消息中查找工具调用结果
+            for msg in current_session_messages:
+                if isinstance(msg, ToolMessage) and hasattr(msg, "name") and msg.name == "rag_knowledge_search":
+                    content = str(msg.content) if hasattr(msg, "content") else ""
+                    chat_logger.info(f"🔍 从当前会话中找到工具调用结果，长度: {len(content)}")
+                    ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', content, re.DOTALL)
+                    if ref_match:
+                        chat_logger.info(f"✅ 从当前会话中找到REFERENCES标签")
+                        try:
+                            ref_data = json.loads(ref_match.group(1))
+                            chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                            references.extend(ref_data)
+                        except Exception as e:
+                            chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                            pass
+            
+            # 去重引用
+            unique_refs = {}
+            for ref in references:
+                key = f"{ref.get('document_name', '')}_{ref.get('title', '')}"
+                if key not in unique_refs or ref.get('score', 0) > unique_refs[key].get('score', 0):
+                    unique_refs[key] = ref
+            
+            chat_logger.info(f"📚 提取到的引用数量: {len(unique_refs)}")
+            
+            # 生成引用来源文本并追加到回答中
+            if unique_refs:
+                ref_text = "\n\n---\n**📚 参考来源：**\n"
+                for i, ref in enumerate(unique_refs.values(), 1):
+                    doc_name = ref.get('document_name', '未知文档')
+                    title = ref.get('title', '')
+                    page_info = ref.get('page_info', '')
+                    
+                    # 构建预览链接
+                    from urllib.parse import quote
+                    encoded_kb = quote(request.knowledge_base_name, safe='')
+                    encoded_doc = quote(doc_name, safe='')
+                    preview_url = f"./kb/api/document/{encoded_kb}/{encoded_doc}/preview"
+                    
+                    if page_info:
+                        ref_text += f"{i}. [{doc_name} - {page_info}]({preview_url})\n"
+                    elif title and title != '无标题':
+                        ref_text += f"{i}. [{doc_name} - {title}]({preview_url})\n"
+                    else:
+                        ref_text += f"{i}. [{doc_name}]({preview_url})\n"
+                
+                # 追加引用信息到回答
+                last_msg.content += ref_text
+                chat_logger.info(f"✅ 已追加引用信息到回答")
+            else:
+                chat_logger.warning(f"⚠️ 没有找到引用信息")
+        except Exception as e:
+            chat_logger.error(f"❌ 提取引用信息失败: {str(e)}")
         # =============== 新增结束 ===============
         
         chat_logger.info(f"📤 返回最终回答，长度: {len(last_msg.content)}")
@@ -2662,6 +3365,10 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
         try:
             # 获取当前会话状态和构建初始状态
             state = await graph.aget_state(config)
+            # 初始化 knowledge_base_name
+            knowledge_base_name = request.knowledge_base_name
+            # 记录初始消息数量，用于后续只提取当前会话的引用
+            initial_message_count = 0
             if state is None or not isinstance(state.values, dict) or "messages" not in state.values:
                 # 新会话处理...
                 user_document_tools_list = []
@@ -2683,8 +3390,10 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                     "knowledge_base_name": request.knowledge_base_name,
                     "tool_call_count": 0,
                     "user_document_tools": user_document_tools_list,
-                    "web_search_enabled": request.enable_web_search
+                    "web_search_enabled": request.enable_web_search,
+                    "initial_message_count": 0  # 新会话，初始消息数为0
                 }
+                initial_message_count = initial_state.get("initial_message_count", 0)
             else:
                 # 续会话处理...
                 knowledge_base_name = state.values.get("knowledge_base_name", request.knowledge_base_name)
@@ -2721,8 +3430,10 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                     "knowledge_base_name": knowledge_base_name,
                     "tool_call_count": 0,  # 每次新消息都重置工具调用次数
                     "user_document_tools": user_document_tools_list,
-                    "web_search_enabled": web_search_enabled
+                    "web_search_enabled": web_search_enabled,
+                    "initial_message_count": len(state.values["messages"])  # 续会话，初始消息数为历史消息数
                 }
+                initial_message_count = initial_state.get("initial_message_count", len(state.values["messages"]))
             
             # 优化分块大小和流式处理逻辑
             CHUNK_SIZE = 50  # 增大分块大小，减少过度分割
@@ -2761,8 +3472,18 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                 tool_results = []
                 final_answer = ""
                 conversation_ended = False
+                knowledge_base_name = request.knowledge_base_name if hasattr(request, 'knowledge_base_name') else ""
+                final_graph_state = None  # 保存最终状态
                 
                 async for step in graph.astream_log(initial_state, config=config):
+                    # 保存每一步的状态，最后一步就是最终状态
+                    if isinstance(step, dict) and "ops" in step:
+                        # 尝试从step中提取最终状态
+                        try:
+                            if "values" in step:
+                                final_graph_state = step["values"]
+                        except:
+                            pass
                     if isinstance(step, dict) and "ops" in step:
                         ops = step["ops"]
                     elif hasattr(step, "ops"):
@@ -2855,13 +3576,29 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                                         tool_content = msg.content
                                         tool_name = getattr(msg, "name", "未知工具")
                                         
-                                        # 清理工具调用结果内容
+                                        # 清理工具调用结果内容（但保留REFERENCES标签）
                                         if isinstance(tool_content, str):
                                             import re
-                                            clean_content = re.sub(r'<[^>]+>', '', tool_content)
+                                            # 先提取并保存REFERENCES标签内容
+                                            ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', tool_content, re.DOTALL)
+                                            references_data = ref_match.group(0) if ref_match else None
+                                            
+                                            # 临时替换REFERENCES标签，避免被删除
+                                            if references_data:
+                                                placeholder = f"__REFERENCES_PLACEHOLDER_{id(references_data)}__"
+                                                clean_content = tool_content.replace(references_data, placeholder)
+                                            else:
+                                                clean_content = tool_content
+                                            
+                                            # 清理其他HTML标签
+                                            clean_content = re.sub(r'<[^>]+>', '', clean_content)
                                             clean_content = re.sub(r'https?://[^\s]+', '', clean_content)
                                             clean_content = re.sub(r'\n\s*\n', '\n', clean_content)
                                             clean_content = clean_content.strip()
+                                            
+                                            # 恢复REFERENCES标签
+                                            if references_data and placeholder in clean_content:
+                                                clean_content = clean_content.replace(placeholder, references_data)
                                         else:
                                             clean_content = str(tool_content)
                                         
@@ -2940,13 +3677,29 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                                         tool_content = msg.content
                                         tool_name = getattr(msg, "name", "未知工具")
                                         
-                                        # 清理工具调用结果内容
+                                        # 清理工具调用结果内容（但保留REFERENCES标签）
                                         if isinstance(tool_content, str):
                                             import re
-                                            clean_content = re.sub(r'<[^>]+>', '', tool_content)
+                                            # 先提取并保存REFERENCES标签内容
+                                            ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', tool_content, re.DOTALL)
+                                            references_data = ref_match.group(0) if ref_match else None
+                                            
+                                            # 临时替换REFERENCES标签，避免被删除
+                                            if references_data:
+                                                placeholder = f"__REFERENCES_PLACEHOLDER_{id(references_data)}__"
+                                                clean_content = tool_content.replace(references_data, placeholder)
+                                            else:
+                                                clean_content = tool_content
+                                            
+                                            # 清理其他HTML标签
+                                            clean_content = re.sub(r'<[^>]+>', '', clean_content)
                                             clean_content = re.sub(r'https?://[^\s]+', '', clean_content)
                                             clean_content = re.sub(r'\n\s*\n', '\n', clean_content)
                                             clean_content = clean_content.strip()
+                                            
+                                            # 恢复REFERENCES标签
+                                            if references_data and placeholder in clean_content:
+                                                clean_content = clean_content.replace(placeholder, references_data)
                                         else:
                                             clean_content = str(tool_content)
                                         
@@ -3053,6 +3806,185 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                     # =============== 新增：记录最终剩余内容发送 ===============
                     chat_logger.info(f"📤 流式最终剩余内容发送: 长度={len(remaining_text)}, 内容={remaining_text}")
                     # =============== 新增结束 ===============
+            
+            # =============== 新增：提取并发送引用来源 ===============
+            # 从工具调用结果中提取引用信息
+            references = []
+            chat_logger.info(f"🔍 开始提取引用信息，工具结果数量: {len(tool_results)}")
+            
+            # 方法1：从流式输出中收集的tool_results提取
+            for tool_result in tool_results:
+                if tool_result["name"] == "rag_knowledge_search":
+                    content = tool_result["content"]
+                    chat_logger.info(f"🔍 检查工具结果内容，长度: {len(content)}")
+                    # 解析引用信息
+                    import re
+                    ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', content, re.DOTALL)
+                    if ref_match:
+                        chat_logger.info(f"✅ 找到REFERENCES标签: {ref_match.group(0)[:100]}...")
+                        try:
+                            ref_data = json.loads(ref_match.group(1))
+                            chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                            references.extend(ref_data)
+                        except Exception as e:
+                            chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                            pass
+                    else:
+                        chat_logger.warning(f"⚠️ 未找到REFERENCES标签，内容片段: {content[-200:]}")
+            
+            # 方法2：如果tool_results为空，尝试从消息历史中提取
+            if not references and hasattr(request, 'messages') and request.messages:
+                chat_logger.info(f"🔍 tool_results为空，尝试从消息历史中提取工具调用结果")
+                import re
+                from langchain_core.messages import ToolMessage
+                for msg in request.messages:
+                    if isinstance(msg, ToolMessage) and hasattr(msg, "name") and msg.name == "rag_knowledge_search":
+                        content = str(msg.content) if hasattr(msg, "content") else ""
+                        chat_logger.info(f"🔍 从消息历史中找到工具调用结果，长度: {len(content)}")
+                        ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', content, re.DOTALL)
+                        if ref_match:
+                            chat_logger.info(f"✅ 从消息历史中找到REFERENCES标签")
+                            try:
+                                ref_data = json.loads(ref_match.group(1))
+                                chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                                references.extend(ref_data)
+                            except Exception as e:
+                                chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                                pass
+            
+            # 方法3：从流式输出的full_text中提取（备用方案）
+            if not references and full_text:
+                chat_logger.info(f"🔍 尝试从full_text中提取REFERENCES标签")
+                import re
+                ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', full_text, re.DOTALL)
+                if ref_match:
+                    chat_logger.info(f"✅ 从full_text中找到REFERENCES标签")
+                    try:
+                        ref_data = json.loads(ref_match.group(1))
+                        chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                        references.extend(ref_data)
+                    except Exception as e:
+                        chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                        pass
+            
+            # 方法4：从graph的最终状态中提取（如果前面都失败）
+            if not references:
+                chat_logger.info(f"🔍 尝试从graph最终状态中提取工具调用结果")
+                try:
+                    # 重新运行graph以获取最终状态（如果流式输出中没有收集到）
+                    # 注意：这里我们需要从流式输出的最后一步获取状态
+                    # 由于astream_log已经完成，我们需要从其他地方获取
+                    pass  # 暂时跳过，因为astream_log已经完成
+                except Exception as e:
+                    chat_logger.warning(f"⚠️ 从最终状态提取失败: {str(e)}")
+                    pass
+            
+            # 方法5：从graph最终状态中提取（如果前面都失败）
+            if not references and 'final_graph_state' in locals() and final_graph_state:
+                chat_logger.info(f"🔍 尝试从graph最终状态中提取工具调用结果")
+                try:
+                    from langchain_core.messages import ToolMessage
+                    final_messages = final_graph_state.get("messages", [])
+                    chat_logger.info(f"🔍 最终状态中的消息数量: {len(final_messages)}, 初始消息数量: {initial_message_count}")
+                    # 只从当前会话的消息中提取引用（排除历史消息）
+                    current_session_messages = final_messages[initial_message_count:] if initial_message_count < len(final_messages) else final_messages
+                    chat_logger.info(f"🔍 当前会话消息数量: {len(current_session_messages)}")
+                    for msg in current_session_messages:
+                        if isinstance(msg, ToolMessage) and hasattr(msg, "name") and msg.name == "rag_knowledge_search":
+                            content = str(msg.content) if hasattr(msg, "content") else ""
+                            chat_logger.info(f"🔍 从当前会话中找到工具调用结果，长度: {len(content)}")
+                            import re
+                            ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', content, re.DOTALL)
+                            if ref_match:
+                                chat_logger.info(f"✅ 从当前会话中找到REFERENCES标签")
+                                try:
+                                    ref_data = json.loads(ref_match.group(1))
+                                    chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                                    references.extend(ref_data)
+                                except Exception as e:
+                                    chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                                    pass
+                except Exception as e:
+                    chat_logger.warning(f"⚠️ 从最终状态提取失败: {str(e)}")
+                    pass
+            
+            # 方法6：从数据库会话历史中提取（最后的手段）
+            if not references:
+                chat_logger.info(f"🔍 尝试从数据库会话历史中提取工具调用结果")
+                try:
+                    # 从数据库获取当前会话的所有消息
+                    from langchain_core.messages import ToolMessage
+                    state = await graph.aget_state(config)
+                    session_messages = state.values.get("messages", []) if hasattr(state, "values") else []
+                    chat_logger.info(f"🔍 数据库会话历史中的消息数量: {len(session_messages)}")
+                    for msg in session_messages:
+                        if isinstance(msg, ToolMessage) and hasattr(msg, "name") and msg.name == "rag_knowledge_search":
+                            content = str(msg.content) if hasattr(msg, "content") else ""
+                            chat_logger.info(f"🔍 从数据库会话历史中找到工具调用结果，长度: {len(content)}")
+                            import re
+                            ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', content, re.DOTALL)
+                            if ref_match:
+                                chat_logger.info(f"✅ 从数据库会话历史中找到REFERENCES标签")
+                                try:
+                                    ref_data = json.loads(ref_match.group(1))
+                                    chat_logger.info(f"✅ 成功解析引用数据，数量: {len(ref_data)}")
+                                    references.extend(ref_data)
+                                except Exception as e:
+                                    chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+                                    pass
+                except Exception as e:
+                    chat_logger.warning(f"⚠️ 从数据库会话历史提取失败: {str(e)}")
+                    pass
+            
+            chat_logger.info(f"📚 提取到的引用总数: {len(references)}")
+            
+            # 去重引用（按文档名和标题）
+            unique_refs = {}
+            for ref in references:
+                key = f"{ref.get('document_name', '')}_{ref.get('title', '')}"
+                if key not in unique_refs or ref.get('score', 0) > unique_refs[key].get('score', 0):
+                    unique_refs[key] = ref
+            
+            chat_logger.info(f"📚 去重后的引用数量: {len(unique_refs)}")
+            
+            # 生成引用来源文本
+            if unique_refs:
+                ref_text = "\n\n---\n**📚 参考来源：**\n"
+                for i, ref in enumerate(unique_refs.values(), 1):
+                    doc_name = ref.get('document_name', '未知文档')
+                    title = ref.get('title', '')
+                    page_info = ref.get('page_info', '')
+                    
+                    # 构建预览链接（使用URL编码）
+                    from urllib.parse import quote
+                    encoded_kb = quote(knowledge_base_name, safe='')
+                    encoded_doc = quote(doc_name, safe='')
+                    preview_url = f"./kb/api/document/{encoded_kb}/{encoded_doc}/preview"
+                    
+                    # 格式化引用信息
+                    if page_info:
+                        ref_text += f"{i}. [{doc_name} - {page_info}]({preview_url})\n"
+                    elif title and title != '无标题':
+                        ref_text += f"{i}. [{doc_name} - {title}]({preview_url})\n"
+                    else:
+                        ref_text += f"{i}. [{doc_name}]({preview_url})\n"
+                
+                chat_logger.info(f"📤 准备发送引用来源，内容: {ref_text}")
+                # 发送引用来源
+                ref_chunks = [ref_text[i:i+CHUNK_SIZE] for i in range(0, len(ref_text), CHUNK_SIZE)]
+                for chunk in ref_chunks:
+                    data = {
+                        "text": chunk,
+                        "finish_reason": None,
+                        "session_id": session_id,
+                        "message_id": message_id
+                    }
+                    yield f"data: {json.dumps(data)}\n"
+                    await asyncio.sleep(0.01)
+                chat_logger.info(f"✅ 引用来源已发送")
+            else:
+                chat_logger.warning(f"⚠️ 没有找到引用信息，无法发送引用链接")
+            # =============== 新增结束 ===============
             
             # 统一发送结束标记（避免重复）
             end_data = {
@@ -3630,7 +4562,7 @@ app.add_middleware(create_auth_middleware())
 # 文档预览API
 @kb_router.get("/api/document/{kb_name}/{document_name}/preview")
 async def preview_document(kb_name: str, document_name: str):
-    """预览文档内容 - 优先使用原文件内容"""
+    """预览文档内容 - 优先使用原格式预览"""
     logger.info(f"预览文档请求: kb_name={kb_name}, document_name={document_name}")
     try:
         # 从Qdrant中获取文档内容
@@ -3638,6 +4570,7 @@ async def preview_document(kb_name: str, document_name: str):
         client = QdrantClient(host="localhost", port=6333)
         
         # 搜索包含该文档的点 - 支持部分匹配
+        # 先尝试直接匹配
         search_result = client.scroll(
             collection_name=collection_name,
             scroll_filter=qdrant_models.Filter(
@@ -3650,6 +4583,23 @@ async def preview_document(kb_name: str, document_name: str):
             ),
             limit=1  # 只需要一个点就能获取原文件内容
         )
+        
+        # 如果直接匹配失败，尝试去掉扩展名匹配（因为PDF文件在数据库中可能存储为.mmd）
+        if not search_result[0] and '.' in document_name:
+            name_without_ext = document_name.rsplit('.', 1)[0]
+            logger.info(f"直接匹配失败，尝试去掉扩展名匹配: {name_without_ext}")
+            search_result = client.scroll(
+                collection_name=collection_name,
+                scroll_filter=qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="metadata.source",
+                            match=qdrant_models.MatchText(text=name_without_ext)
+                        )
+                    ]
+                ),
+                limit=1
+            )
         
         logger.info(f"预览文档查询结果: {len(search_result[0]) if search_result[0] else 0} 个点")
         
@@ -3664,12 +4614,56 @@ async def preview_document(kb_name: str, document_name: str):
         first_point = search_result[0][0]
         payload = first_point.payload
         
-        # 优先使用原文件内容
-        original_content = payload.get("original_content", "")
+        # 检查是否有原文件路径（本地）
+        original_file_path = payload.get("metadata", {}).get("original_file_path")
         source_name = payload.get("source_name", document_name)
         
+        # 如果有原文件路径，返回本地文件路径
+        if original_file_path:
+            try:
+                # 构建完整的本地文件路径
+                if original_file_path.startswith("original_files/"):
+                    # 相对路径，转换为绝对路径
+                    full_local_path = os.path.join("/home/user/ustcchat", original_file_path)
+                else:
+                    # 如果已经是绝对路径，直接使用
+                    full_local_path = original_file_path
+                
+                # 检查文件是否存在
+                if os.path.exists(full_local_path):
+                    logger.info(f"使用原文件预览: {full_local_path}")
+                    
+                    # 获取文件扩展名
+                    file_ext = os.path.splitext(original_file_path)[1].lower()
+                    
+                    # 生成文件访问URL（通过API端点），需要对文件名进行URL编码
+                    from urllib.parse import quote
+                    encoded_filename = quote(os.path.basename(original_file_path), safe='')
+                    file_url = f"/kb/api/original-file/{quote(kb_name, safe='')}/{encoded_filename}"
+                    
+                    return {
+                        "success": True,
+                        "message": f"文档 '{source_name}' 原文件预览",
+                        "data": {
+                            "document_name": source_name,
+                            "original_file_url": file_url,
+                            "original_file_path": original_file_path,
+                            "local_file_path": full_local_path,
+                            "file_type": file_ext,
+                            "content_type": "original_file",
+                            "preview_mode": "original"  # 标识使用原格式预览
+                        }
+                    }
+                else:
+                    logger.warning(f"原文件不存在: {full_local_path}")
+            except Exception as file_error:
+                logger.warning(f"访问原文件失败: {str(file_error)}")
+        
+        # 如果没有原文件路径，使用 markdown 内容预览
+        original_content = payload.get("original_content", "")
+        
         if original_content:
-            # 使用原文件内容
+            # 使用原文件内容（markdown）
             logger.info(f"使用原文件内容预览: {source_name}")
             
             # 处理图片路径：将相对路径转换为绝对路径
@@ -3678,27 +4672,27 @@ async def preview_document(kb_name: str, document_name: str):
             
             # 查找所有图片引用 ![](image_path)
             def replace_image_path(match):
-                image_path = match.group(1)
+                image_path = match.group(2)  # 第二个组是路径
                 # 如果已经是绝对路径，直接返回
                 if image_path.startswith('/') or image_path.startswith('http'):
                     return match.group(0)
                 
                 # 将相对路径转换为绝对路径
-                # 格式：![](image_path) -> ![](/marker_outputs/{base_name}/{base_name}_images/{image_path})
                 base_name = os.path.splitext(source_name)[0]
                 absolute_path = f"/marker_outputs/{base_name}/{base_name}_images/{image_path}"
-                return f"![]({absolute_path})"
+                return f"![{match.group(1)}]({absolute_path})"
             
             # 替换所有图片路径
             processed_content = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', replace_image_path, processed_content)
             
             return {
                 "success": True,
-                "message": f"文档 '{source_name}' 预览内容（原文件）",
+                "message": f"文档 '{source_name}' 预览内容（Markdown）",
                 "data": {
                     "document_name": source_name,
                     "content": processed_content,
-                    "content_type": "original"
+                    "content_type": "markdown",
+                    "preview_mode": "markdown"
                 }
             }
         else:
@@ -3707,10 +4701,105 @@ async def preview_document(kb_name: str, document_name: str):
             return await preview_document_fallback(kb_name, document_name, client)
         
     except Exception as e:
-        logger.error(f"预览文档失败: {str(e)}")
+        logger.error(f"预览文档失败: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"预览文档失败: {str(e)}",
+            "data": {}
+        }
+
+
+# 原文件下载API（支持GET和HEAD方法）
+@kb_router.get("/api/original-file/{kb_name}/{filename}")
+@kb_router.head("/api/original-file/{kb_name}/{filename}")
+async def download_original_file(kb_name: str, filename: str):
+    """下载原文件"""
+    try:
+        # URL 解码文件名和知识库名称
+        from urllib.parse import unquote
+        decoded_kb_name = unquote(kb_name)
+        decoded_filename = unquote(filename)
+        
+        logger.info(f"下载原文件请求: kb_name={kb_name}, filename={filename}")
+        logger.info(f"解码后: kb_name={decoded_kb_name}, filename={decoded_filename}")
+        
+        # 构建文件路径
+        file_path = os.path.join(ORIGINAL_FILES_DIR, decoded_kb_name, decoded_filename)
+        logger.info(f"文件路径: {file_path}")
+        
+        if not os.path.exists(file_path):
+            logger.error(f"文件不存在: {file_path}")
+            # 列出目录内容以便调试
+            kb_dir = os.path.join(ORIGINAL_FILES_DIR, decoded_kb_name)
+            if os.path.exists(kb_dir):
+                files = os.listdir(kb_dir)
+                logger.error(f"目录 {kb_dir} 中的文件: {files}")
+            else:
+                logger.error(f"知识库目录不存在: {kb_dir}")
+            return {
+                "success": False,
+                "message": f"文件不存在: {decoded_filename}",
+                "data": {}
+            }
+        
+        # 根据文件扩展名设置正确的 MIME 类型
+        file_ext = os.path.splitext(decoded_filename)[1].lower()
+        media_type_map = {
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.txt': 'text/plain',
+            '.md': 'text/markdown',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+        }
+        media_type = media_type_map.get(file_ext, 'application/octet-stream')
+        
+        # 返回文件
+        # 对于PDF文件，使用 inline 而不是 attachment，以便在 iframe 中显示
+        # 检查是否是PDF文件，如果是，使用 inline 模式
+        if file_ext == '.pdf':
+            # 使用 StreamingResponse 以便控制 Content-Disposition
+            async def file_generator():
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+            
+            # 对于 PDF 文件，使用 inline 模式以便在 iframe 中显示
+            # 不设置 filename，避免中文字符编码问题
+            # 允许在iframe中嵌入（移除X-Frame-Options限制）
+            headers = {
+                'Content-Type': media_type,
+                'Content-Disposition': 'inline',
+                'X-Frame-Options': 'SAMEORIGIN',  # 允许同源iframe嵌入
+            }
+            
+            return StreamingResponse(
+                file_generator(),
+                media_type=media_type,
+                headers=headers
+            )
+        else:
+            # 其他文件类型使用 FileResponse（默认 attachment）
+            response = FileResponse(
+                path=file_path,
+                filename=decoded_filename,
+                media_type=media_type
+            )
+            return response
+    except Exception as e:
+        logger.error(f"下载原文件失败: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"下载原文件失败: {str(e)}",
             "data": {}
         }
 
