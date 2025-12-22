@@ -7,7 +7,13 @@ import json
 import asyncio
 from typing import List, Dict, Any, Optional, Union
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    AIMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.callbacks import CallbackManagerForLLMRun, AsyncCallbackManagerForLLMRun
 from langchain_core.tools import BaseTool
@@ -123,6 +129,9 @@ class NSRLDeepSeekChat(BaseChatModel):
                 api_messages.append({"role": "assistant", "content": msg.content})
             elif isinstance(msg, SystemMessage):
                 api_messages.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, ToolMessage):
+                # 保留工具返回结果，作为assistant消息传给模型
+                api_messages.append({"role": "assistant", "content": msg.content})
         
         # 构建请求数据
         payload = {
@@ -157,7 +166,7 @@ class NSRLDeepSeekChat(BaseChatModel):
         }
         
         logger.info(f"发送请求到: {self.api_base}")
-        logger.debug(f"请求数据: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.info(f"[LLM REQUEST] payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
         
         # 使用 httpx 发送请求（同步版本，用于同步调用）
         try:
@@ -300,6 +309,9 @@ class NSRLDeepSeekChat(BaseChatModel):
                 api_messages.append({"role": "assistant", "content": msg.content})
             elif isinstance(msg, SystemMessage):
                 api_messages.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, ToolMessage):
+                # 保留工具返回结果，作为assistant消息传给模型
+                api_messages.append({"role": "assistant", "content": msg.content})
         
         # 构建请求数据
         payload = {
@@ -332,7 +344,7 @@ class NSRLDeepSeekChat(BaseChatModel):
         }
         
         logger.info(f"[异步] 发送请求到: {self.api_base}")
-        logger.debug(f"[异步] 请求数据: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.info(f"[异步 LLM REQUEST] payload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
         
         # 使用异步 httpx 客户端发送请求
         try:
@@ -453,4 +465,3 @@ class NSRLDeepSeekChat(BaseChatModel):
             return ChatResult(generations=[generation])
         else:
             raise ValueError(f"意外的响应格式: {result}")
-

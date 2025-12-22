@@ -2540,6 +2540,7 @@ async def call_model(state: AgentState):
 - 错误示例: {{"name": "rag_knowledge_search", "arguments": {{"query": "...", "using": "..."}}}}"""
             
         messages = [SystemMessage(content=system_prompt)] + messages
+        # 记录最终拼好的系统提示，便于排查
         
         # 检查工具调用次数 - 如果超过限制，强制模型提供答案
         # 注意：tool_call_count 会在每次新消息时重置为0，所以这里的检查是针对单次对话的工具调用次数
@@ -2608,6 +2609,11 @@ async def call_model(state: AgentState):
                     break
         
         chat_logger.info(f"🔍 检查工具调用结果 - tool_call_count: {tool_call_count}, has_tool_result: {has_tool_result}, 最后用户消息索引: {last_user_message_index}")
+        
+        # 确保工具返回消息会被传给模型（有些场景下消息列表可能缺少ToolMessage）
+        if has_tool_result and last_tool_message and last_tool_message not in messages:
+            messages.append(last_tool_message)
+            chat_logger.info("🔧 工具结果未在消息列表中，已补充 ToolMessage 传给模型")
         
         if has_tool_result and last_tool_message:
             # 找到了工具结果，添加系统提示强制模型基于工具结果生成最终回答
@@ -2876,6 +2882,10 @@ def tool_node(state: AgentState):
                     if similarities:
                         max_sim = max(float(s) for s in similarities)
                         chat_logger.info(f"🎯 RAG工具最高相似度: {max_sim:.4f}")
+                
+                # 将工具返回结果同步到主日志，方便快速排查
+                logger.info(f"[TOOL RETURN] {tool_name} length={len(response_str)}")
+                logger.info(f"[TOOL RETURN] preview: {response_str[:500]}{'...' if len(response_str) > 500 else ''}")
                 
                 # 在工具结果中包含用户的原始问题
                 user_question = ""
