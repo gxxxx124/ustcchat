@@ -3254,12 +3254,13 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
                             chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
                             pass
             
-            # 去重引用
+            # 去重引用：同一文件只保留得分最高的一个引用
             unique_refs = {}
             for ref in references:
-                key = f"{ref.get('document_name', '')}_{ref.get('title', '')}"
-                if key not in unique_refs or ref.get('score', 0) > unique_refs[key].get('score', 0):
-                    unique_refs[key] = ref
+                doc_key = ref.get('document_name', '')
+                score = ref.get('score', 0)
+                if doc_key not in unique_refs or score > unique_refs[doc_key].get('score', 0):
+                    unique_refs[doc_key] = ref
             
             chat_logger.info(f"📚 提取到的引用数量: {len(unique_refs)}")
             
@@ -3277,12 +3278,15 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
                     encoded_doc = quote(doc_name, safe='')
                     preview_url = f"./kb/api/document/{encoded_kb}/{encoded_doc}/preview"
                     
+                    # 同一文件只保留一个链接；优先展示页码信息，其次标题
                     if page_info:
-                        ref_text += f"{i}. [{doc_name} - {page_info}]({preview_url})\n"
+                        display_text = f"{doc_name} - {page_info}"
                     elif title and title != '无标题':
-                        ref_text += f"{i}. [{doc_name} - {title}]({preview_url})\n"
+                        display_text = f"{doc_name} - {title}"
                     else:
-                        ref_text += f"{i}. [{doc_name}]({preview_url})\n"
+                        display_text = doc_name
+                    
+                    ref_text += f"{i}. [{display_text}]({preview_url})\n"
                 
                 # 追加引用信息到回答
                 last_msg.content += ref_text
@@ -3948,12 +3952,13 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
             
             chat_logger.info(f"📚 提取到的引用总数: {len(references)}")
             
-            # 去重引用（按文档名和标题）
+            # 去重引用（同一文件只保留得分最高的一条）
             unique_refs = {}
             for ref in references:
-                key = f"{ref.get('document_name', '')}_{ref.get('title', '')}"
-                if key not in unique_refs or ref.get('score', 0) > unique_refs[key].get('score', 0):
-                    unique_refs[key] = ref
+                doc_key = ref.get('document_name', '')
+                score = ref.get('score', 0)
+                if doc_key not in unique_refs or score > unique_refs[doc_key].get('score', 0):
+                    unique_refs[doc_key] = ref
             
             chat_logger.info(f"📚 去重后的引用数量: {len(unique_refs)}")
             
@@ -3971,13 +3976,15 @@ async def chat_stream_endpoint(request: ChatRequest, http_request: Request = Non
                     encoded_doc = quote(doc_name, safe='')
                     preview_url = f"./kb/api/document/{encoded_kb}/{encoded_doc}/preview"
                     
-                    # 格式化引用信息
+                    # 同一文件只显示一个链接；优先显示页码信息，其次标题
                     if page_info:
-                        ref_text += f"{i}. [{doc_name} - {page_info}]({preview_url})\n"
+                        display_text = f"{doc_name} - {page_info}"
                     elif title and title != '无标题':
-                        ref_text += f"{i}. [{doc_name} - {title}]({preview_url})\n"
+                        display_text = f"{doc_name} - {title}"
                     else:
-                        ref_text += f"{i}. [{doc_name}]({preview_url})\n"
+                        display_text = doc_name
+                    
+                    ref_text += f"{i}. [{display_text}]({preview_url})\n"
                 
                 chat_logger.info(f"📤 准备发送引用来源，内容: {ref_text}")
                 # 发送引用来源
