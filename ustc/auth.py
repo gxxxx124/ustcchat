@@ -13,8 +13,11 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# JWT配置（从环境变量读取）
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+# JWT配置（从环境变量读取，缺失即报错，避免使用硬编码默认值）
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY or SECRET_KEY == "your-secret-key-change-this-in-production":
+    raise RuntimeError("SECRET_KEY 未设置，请在环境变量或 .env 中配置后再启动服务")
+
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 

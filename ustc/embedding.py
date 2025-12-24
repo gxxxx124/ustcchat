@@ -6,7 +6,12 @@ import os
 
 
 class QwenEmbedding(Embeddings):
-    def __init__(self, model_path: str = "/home/user/ustcchat/ustc/models/Qwen/Qwen3-Embedding-0.6B"):
+    def __init__(self, model_path: str = None):
+        # 允许通过环境变量覆盖模型路径，默认指向本地已下载的Qwen embedding目录
+        self.model_path = model_path or os.getenv(
+            "EMBEDDING_MODEL_PATH",
+            "/home/user/ustcchat/ustc/models/Qwen"  # 实际存在的模型目录
+        )
         self.model_path = model_path
         
         # 检查是否是sentence-transformers格式的模型
