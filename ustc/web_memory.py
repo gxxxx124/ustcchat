@@ -420,7 +420,7 @@ def get_current_knowledge_base_info(kb_name: str, filter_username: Optional[str]
     try:
         # 使用全局Qdrant客户端
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         # 检查集合是否存在
         try:
             qdrant_client.get_collection(kb_name)
@@ -1206,7 +1206,7 @@ def query_knowledge_base_sync(knowledge_base_name: str, query: str, search_type:
     try:
         global qdrant_client
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
 
         # 检查知识库是否存在
         try:
@@ -1283,7 +1283,7 @@ async def manage_knowledge_base(request: KnowledgeBaseRequest):
         if request.action == KnowledgeBaseAction.CREATE:
             # 检查集合是否已存在
             if qdrant_client is None:
-                qdrant_client = QdrantClient(host="localhost", port=6333)
+                qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
             try:
                 # 尝试获取集合，如果存在则返回exists
                 qdrant_client.get_collection(request.name)
@@ -1324,7 +1324,7 @@ async def manage_knowledge_base(request: KnowledgeBaseRequest):
         elif request.action == KnowledgeBaseAction.DELETE:
             try:
                 if qdrant_client is None:
-                    qdrant_client = QdrantClient(host="localhost", port=6333)
+                    qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
                 qdrant_client.delete_collection(request.name)
                 message = f"知识库 '{request.name}' 已删除"
                 return KnowledgeBaseResponse(
@@ -1489,7 +1489,7 @@ async def list_knowledge_bases():
     try:
         global qdrant_client
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         collections = qdrant_client.get_collections().collections
         kb_list = []
         for collection in collections:
@@ -1586,7 +1586,7 @@ async def upload_qa_pairs_batch(request: List[QAPairRequest]):
         # 检查知识库是否存在（使用第一个请求的知识库名称）
         knowledge_base_name = request[0].knowledge_base_name
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         
         try:
             qdrant_client.get_collection(knowledge_base_name)
@@ -1711,7 +1711,7 @@ async def upload_md_files_batch(request: List[MarkdownFileRequest]):
         # 检查知识库是否存在（使用第一个请求的知识库名称）
         knowledge_base_name = request[0].knowledge_base_name
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         
         try:
             qdrant_client.get_collection(knowledge_base_name)
@@ -2093,7 +2093,7 @@ async def delete_items_batch(request: List[DeleteRequest], http_request: Request
         # 检查知识库是否存在（使用第一个请求的知识库名称）
         knowledge_base_name = request[0].knowledge_base_name
         if qdrant_client is None:
-            qdrant_client = QdrantClient(host="localhost", port=6333)
+            qdrant_client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         
         try:
             qdrant_client.get_collection(knowledge_base_name)
@@ -4442,8 +4442,26 @@ async def lifespan(app: FastAPI):
         logger.info("初始化Qdrant客户端...")
         qdrant_host = os.getenv("QDRANT_HOST", "localhost")
         qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
-        qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
-        logger.info("✅ Qdrant客户端初始化成功")
+
+        # 临时清除代理环境变量，防止干扰 Qdrant 连接
+        old_http_proxy = os.environ.pop('http_proxy', None)
+        old_https_proxy = os.environ.pop('https_proxy', None)
+        old_http_proxy_upper = os.environ.pop('HTTP_PROXY', None)
+        old_https_proxy_upper = os.environ.pop('HTTPS_PROXY', None)
+
+        try:
+            qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port, check_compatibility=False)
+            logger.info("✅ Qdrant客户端初始化成功")
+        finally:
+            # 恢复代理环境变量
+            if old_http_proxy:
+                os.environ['http_proxy'] = old_http_proxy
+            if old_https_proxy:
+                os.environ['https_proxy'] = old_https_proxy
+            if old_http_proxy_upper:
+                os.environ['HTTP_PROXY'] = old_http_proxy_upper
+            if old_https_proxy_upper:
+                os.environ['HTTPS_PROXY'] = old_https_proxy_upper
         
         # 2. 初始化数据库连接池（Agent需要）
         logger.info("初始化数据库连接池...")
@@ -4584,7 +4602,7 @@ async def preview_document(kb_name: str, document_name: str):
     try:
         # 从Qdrant中获取文档内容
         collection_name = kb_name
-        client = QdrantClient(host="localhost", port=6333)
+        client = QdrantClient(host="localhost", port=6333, check_compatibility=False)
         
         # 搜索包含该文档的点 - 支持部分匹配
         # 先尝试直接匹配

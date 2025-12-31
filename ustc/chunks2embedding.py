@@ -309,7 +309,25 @@ def embedding_init(
     if host.startswith(('http://', 'https://')):
         # 从URL中提取主机名
         host = host.split('://')[1].split(':')[0]
-    client = QdrantClient(host=host, port=port)
+
+    # 临时禁用代理，避免对本地连接造成影响
+    old_http_proxy = os.environ.pop('http_proxy', None)
+    old_https_proxy = os.environ.pop('https_proxy', None)
+    old_HTTP_PROXY = os.environ.pop('HTTP_PROXY', None)
+    old_HTTPS_PROXY = os.environ.pop('HTTPS_PROXY', None)
+
+    try:
+        client = QdrantClient(host=host, port=port)
+    finally:
+        # 恢复代理环境变量
+        if old_http_proxy:
+            os.environ['http_proxy'] = old_http_proxy
+        if old_https_proxy:
+            os.environ['https_proxy'] = old_https_proxy
+        if old_HTTP_PROXY:
+            os.environ['HTTP_PROXY'] = old_HTTP_PROXY
+        if old_HTTPS_PROXY:
+            os.environ['HTTPS_PROXY'] = old_HTTPS_PROXY
 
     # 使用单例模式：embedding 模型只初始化一次（全局共享）
     global _global_embedding_model
@@ -417,18 +435,41 @@ def delete_by_source(source_name: str, vector_store: EnhancedQdrantVectorStore):
 
 def list_all_collections(host: str = "localhost", port: int = 6333):
     """列出所有集合"""
-    client = QdrantClient(host=host, port=port)
-    collections = client.get_collections().collections
-    print("�� 当前Qdrant中的集合:")
-    for collection in collections:
-        print(f"- {collection.name} (点数: {collection.points_count})")
-    return collections
+    # 临时禁用代理，避免对本地连接造成影响
+    old_http_proxy = os.environ.pop('http_proxy', None)
+    old_https_proxy = os.environ.pop('https_proxy', None)
+    old_HTTP_PROXY = os.environ.pop('HTTP_PROXY', None)
+    old_HTTPS_PROXY = os.environ.pop('HTTPS_PROXY', None)
+
+    try:
+        client = QdrantClient(host=host, port=port)
+        collections = client.get_collections().collections
+        print(" 当前Qdrant中的集合:")
+        for collection in collections:
+            print(f"- {collection.name}")
+        return collections
+    finally:
+        # 恢复代理环境变量
+        if old_http_proxy:
+            os.environ['http_proxy'] = old_http_proxy
+        if old_https_proxy:
+            os.environ['https_proxy'] = old_https_proxy
+        if old_HTTP_PROXY:
+            os.environ['HTTP_PROXY'] = old_HTTP_PROXY
+        if old_HTTPS_PROXY:
+            os.environ['HTTPS_PROXY'] = old_HTTPS_PROXY
 
 
 def get_collection_info(collection_name: str, host: str = "localhost", port: int = 6333):
     """获取集合详细信息"""
-    client = QdrantClient(host=host, port=port)
+    # 临时禁用代理，避免对本地连接造成影响
+    old_http_proxy = os.environ.pop('http_proxy', None)
+    old_https_proxy = os.environ.pop('https_proxy', None)
+    old_HTTP_PROXY = os.environ.pop('HTTP_PROXY', None)
+    old_HTTPS_PROXY = os.environ.pop('HTTPS_PROXY', None)
+
     try:
+        client = QdrantClient(host=host, port=port)
         info = client.get_collection(collection_name)
         print(f" 集合 {collection_name} 详情:")
         print(f"点数: {info.points_count}")
@@ -438,62 +479,16 @@ def get_collection_info(collection_name: str, host: str = "localhost", port: int
     except Exception as e:
         print(f"❌ 获取集合信息失败: {str(e)}")
         return None
-
-
-def upsert_qa_pair(qa_content: str, metadata: Dict[str, Any], vector_store: EnhancedQdrantVectorStore):
-    """上传问答对到Qdrant"""
-    try:
-        # 从metadata中获取文档名，如果没有则生成默认名
-        document_name = metadata.get('document_name', f"qa_{hash(qa_content) % 10000}")
-        # 确保文档名以.md结尾
-        if not document_name.endswith('.md'):
-            document_name = f"{document_name}.md"
-        
-        # 生成唯一ID（基于问题和答案的组合）
-        qa_id = hash(f"{metadata.get('question', '')}{metadata.get('answer', '')}") % (2 ** 63)
-        
-        # 更新metadata中的source字段为文档名
-        metadata['source'] = document_name
-        
-        # 生成向量
-        title_vector = vector_store.embedding_model.embed_query(
-            f"问题: {metadata.get('question', '')}"
-        )
-        content_vector = vector_store.embedding_model.embed_query(
-            f"内容: {qa_content}"
-        )
-        
-        # 构建数据点
-        point = PointStruct(
-            id=qa_id,
-            vector={
-                "title": title_vector,
-                "content": content_vector
-            },
-            payload={
-                "page_content": qa_content,
-                "metadata": metadata
-            }
-        )
-        
-        # 上传到向量数据库
-        operation_info = vector_store.client.upsert(
-            collection_name=vector_store.collection_name,
-            points=[point],
-            wait=True
-        )
-        
-        print(f"✅ 已上传问答对到集合 {vector_store.collection_name}")
-        print(f"文档名: {document_name}")
-        print(f"问题: {metadata.get('question', '')[:50]}...")
-        print(f"操作详情: {operation_info}")
-        return operation_info
-        
-    except Exception as e:
-        print(f"❌ 上传问答对失败: {str(e)}")
-        raise e
-
-
+    finally:
+        # 恢复代理环境变量
+        if old_http_proxy:
+            os.environ['http_proxy'] = old_http_proxy
+        if old_https_proxy:
+            os.environ['https_proxy'] = old_https_proxy
+        if old_HTTP_PROXY:
+            os.environ['HTTP_PROXY'] = old_HTTP_PROXY
+        if old_HTTPS_PROXY:
+            os.environ['HTTPS_PROXY'] = old_HTTPS_PROXY
 def upsert_md_file_with_source(file_path: str, vector_store: EnhancedQdrantVectorStore, source_name: str):
     """上传Markdown文件到Qdrant，使用指定的source名称"""
     chunks = parse_markdown_file(file_path)  # 使用原来的函数
@@ -660,3 +655,55 @@ def upsert_md_file_with_original(file_path: str, vector_store: EnhancedQdrantVec
         logger.debug(f"🧹 文档索引后已清理GPU缓存")
     
     return operation_info
+def upsert_qa_pair(qa_content: str, metadata: Dict[str, Any], vector_store: EnhancedQdrantVectorStore):
+    """上传问答对到Qdrant"""
+    try:
+        # 从metadata中获取文档名，如果没有则生成默认名
+        document_name = metadata.get('document_name', f"qa_{hash(qa_content) % 10000}")
+        # 确保文档名以.md结尾
+        if not document_name.endswith('.md'):
+            document_name = f"{document_name}.md"
+        
+        # 生成唯一ID（基于问题和答案的组合）
+        qa_id = hash(f"{metadata.get('question', '')}{metadata.get('answer', '')}") % (2 ** 63)
+        
+        # 更新metadata中的source字段为文档名
+        metadata['source'] = document_name
+        
+        # 生成向量
+        title_vector = vector_store.embedding_model.embed_query(
+            f"问题: {metadata.get('question', '')}"
+        )
+        content_vector = vector_store.embedding_model.embed_query(
+            f"内容: {qa_content}"
+        )
+        
+        # 构建数据点
+        point = PointStruct(
+            id=qa_id,
+            vector={
+                "title": title_vector,
+                "content": content_vector
+            },
+            payload={
+                "page_content": qa_content,
+                "metadata": metadata
+            }
+        )
+        
+        # 上传到向量数据库
+        operation_info = vector_store.client.upsert(
+            collection_name=vector_store.collection_name,
+            points=[point],
+            wait=True
+        )
+        
+        print(f"✅ 已上传问答对到集合 {vector_store.collection_name}")
+        print(f"文档名: {document_name}")
+        print(f"问题: {metadata.get('question', '')[:50]}...")
+        print(f"操作详情: {operation_info}")
+        return operation_info
+        
+    except Exception as e:
+        print(f"❌ 上传问答对失败: {str(e)}")
+        raise e

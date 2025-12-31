@@ -12,16 +12,15 @@ class QwenEmbedding(Embeddings):
             "EMBEDDING_MODEL_PATH",
             "/home/user/ustcchat/ustc/models/Qwen"  # 实际存在的模型目录
         )
-        self.model_path = model_path
         
         # 检查是否是sentence-transformers格式的模型
-        if os.path.exists(os.path.join(model_path, "config_sentence_transformers.json")):
+        if os.path.exists(os.path.join(self.model_path, "config_sentence_transformers.json")):
             # 使用sentence-transformers加载（Qwen3-Embedding-0.6B）
             try:
                 from sentence_transformers import SentenceTransformer
-                self.model = SentenceTransformer(model_path)
+                self.model = SentenceTransformer(self.model_path)
                 self.use_sentence_transformers = True
-                print(f"✅ 使用sentence-transformers加载模型: {model_path}")
+                print(f"✅ 使用sentence-transformers加载模型: {self.model_path}")
             except ImportError:
                 print("⚠️ sentence-transformers未安装，回退到transformers方式")
                 self.use_sentence_transformers = False
