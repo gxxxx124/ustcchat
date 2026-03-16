@@ -92,6 +92,19 @@
             
             return html;
         }
+
+        /** 规范化历史消息中的 HTML，去掉重复嵌套的 ul/ol，避免列表整块被多缩进 */
+        function normalizeHistoryHtml(html) {
+            if (!html || typeof html !== 'string') return html;
+            let s = html;
+            for (var i = 0; i < 10; i++) {
+                var prev = s;
+                s = s.replace(/<ul>\s*<ul>/g, '<ul>').replace(/<\/ul>\s*<\/ul>/g, '</ul>');
+                s = s.replace(/<ol>\s*<ol>/g, '<ol>').replace(/<\/ol>\s*<\/ol>/g, '</ol>');
+                if (s === prev) break;
+            }
+            return s;
+        }
     </script>
     <style>
         * {
@@ -100,11 +113,19 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
             background: #ffffff;
             color: #333333;
             min-height: 100vh;
+            height: 100vh;
+            max-height: 100vh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
@@ -172,15 +193,18 @@
         .main-container {
             display: flex;
             flex: 1;
+            min-height: 0;
             overflow: hidden;
         }
 
         .sidebar {
             width: 280px;
+            min-width: 280px;
             background: #f8f9fa;
             border-right: 1px solid #e5e7eb;
             display: flex;
             flex-direction: column;
+            min-height: 0;
             overflow: hidden;
         }
 
@@ -222,8 +246,23 @@
             transform: translateY(0);
         }
 
+        .sidebar-history-wrap {
+            flex: 1;
+            min-height: 0;
+            padding-top: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-history-wrap h3 {
+            flex-shrink: 0;
+            margin-bottom: 12px;
+        }
+
         .chat-history {
             flex: 1;
+            min-height: 0;
             overflow-y: auto;
             padding: 0 20px 20px;
         }
@@ -373,7 +412,16 @@
         .message.assistant ul,
         .message.assistant ol {
             margin: 8px 0;
-            padding-left: 24px;
+            padding-left: 20px;
+        }
+
+        /* 避免嵌套列表缩进叠加导致“夸张缩进” */
+        .message.assistant ul ul,
+        .message.assistant ul ol,
+        .message.assistant ol ul,
+        .message.assistant ol ol {
+            margin: 4px 0;
+            padding-left: 16px;
         }
 
         .message.assistant li {
@@ -437,6 +485,11 @@
         .message.assistant em {
             font-style: italic;
             color: #6b7280;
+        }
+
+        .message.assistant a {
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .message.thinking {
@@ -845,7 +898,7 @@
                     文件管理
                 </button>
             </div>
-            <div class="sidebar-section" style="flex: 1; padding-top: 0;">
+            <div class="sidebar-section sidebar-history-wrap">
                 <h3>历史对话</h3>
                 <div class="chat-history" id="chatHistory">
                     <!-- 历史对话将在这里动态生成 -->
@@ -1283,17 +1336,27 @@
             
             const firstUserMessage = Array.from(messages).find(msg => msg.classList.contains('user'));
             if (!firstUserMessage) return;
-            
+
             const title = getChatTitle(firstUserMessage.textContent);
+            // 修复：使用innerHTML保存助手消息（包含已解析的Markdown格式），用户消息保持textContent
             const chatData = {
                 id: currentSessionId,
                 userId: currentUserId,
                 title: title,
                 timestamp: new Date().toISOString(),
-                messages: Array.from(messages).map(msg => ({
-                    role: msg.classList.contains('user') ? 'user' : 'assistant',
-                    content: msg.textContent
-                }))
+                messages: Array.from(messages).map(msg => {
+                    if (msg.classList.contains('user')) {
+                        return {
+                            role: 'user',
+                            content: msg.textContent
+                        };
+                    } else {
+                        return {
+                            role: 'assistant',
+                            content: msg.innerHTML  // 保存innerHTML以保留解析后的HTML格式
+                        };
+                    }
+                })
             };
             
             // 保存到localStorage，使用用户ID作为键
@@ -1320,33 +1383,43 @@
         async function saveCurrentConversation() {
             const messages = document.querySelectorAll('.message');
             console.log('保存对话 - 消息数量:', messages.length, '对话ID:', currentConversationId);
-            
+
             if (messages.length === 0 || !currentConversationId) {
                 console.log('跳过保存 - 没有消息或对话ID');
                 return;
             }
-            
+
             // 检查是否已经保存过（避免重复保存）
             if (window.lastSavedConversationId === currentConversationId) {
                 console.log('跳过保存 - 对话已保存过');
                 return;
             }
-            
+
             try {
                 // 获取第一条用户消息作为标题
                 const firstUserMessage = Array.from(messages).find(msg => msg.classList.contains('user'));
                 if (!firstUserMessage) return;
-                
+
                 const title = getChatTitle(firstUserMessage.textContent);
-                
+
                 // 准备对话数据
+                // 修复：使用innerHTML保存助手消息（包含已解析的Markdown格式），用户消息保持textContent
                 const chatData = {
                     conversation_id: currentConversationId,
                     title: title,
-                    messages: Array.from(messages).map(msg => ({
-                        role: msg.classList.contains('user') ? 'user' : 'assistant',
-                        content: msg.textContent
-                    }))
+                    messages: Array.from(messages).map(msg => {
+                        if (msg.classList.contains('user')) {
+                            return {
+                                role: 'user',
+                                content: msg.textContent
+                            };
+                        } else {
+                            return {
+                                role: 'assistant',
+                                content: msg.innerHTML  // 保存innerHTML以保留解析后的HTML格式
+                            };
+                        }
+                    })
                 };
                 
                 // 获取基础路径
@@ -1570,13 +1643,47 @@
                 if (response.ok) {
                     const data = await response.json();
                     // currentConversationId 已经在上面设置过了，不需要重复设置
-                    
+
                     // 显示对话历史
                     const messagesContainer = document.getElementById('messages');
                     const history = data.conversation_history || data.history || [];
-                    messagesContainer.innerHTML = history.map(msg => `
-                        <div class="message ${msg.role}">${msg.content}</div>
-                    `).join('');
+
+                    // 渲染历史消息：助手消息使用Markdown解析，用户消息保持纯文本
+                    // 若内容已是HTML（之前保存的innerHTML），则直接使用，避免重复解析导致缩进累积
+                    messagesContainer.innerHTML = '';
+                    history.forEach(msg => {
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = `message ${msg.role}`;
+
+                        if (msg.role === 'assistant') {
+                            const content = msg.content || '';
+                            // 若为之前保存的 innerHTML（含解析后的标签），先规范化再使用，避免重复嵌套导致夸张缩进
+                            const isAlreadyHtml = /<(?:ul|ol|li|p|strong|em|h[1-6]|a\s|pre|code|blockquote)[\s>]/.test(content);
+                            if (isAlreadyHtml) {
+                                messageDiv.innerHTML = normalizeHistoryHtml(content);
+                            } else {
+                                messageDiv.innerHTML = parseMarkdown(content);
+                            }
+                        } else {
+                            messageDiv.textContent = msg.content;
+                        }
+
+                        messagesContainer.appendChild(messageDiv);
+                    });
+
+                    // 绑定文档预览链接点击事件（与addMessage中相同）
+                    const docLinks = messagesContainer.querySelectorAll('.doc-preview-link');
+                    docLinks.forEach(link => {
+                        link.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const kbName = this.getAttribute('data-kb');
+                            const docName = this.getAttribute('data-doc');
+                            if (kbName && docName) {
+                                previewDocumentFromChat(kbName, docName);
+                            }
+                        });
+                    });
                     
                     // 确保输入框可见
                     const normalInputContainer = document.getElementById('normalInputContainer');

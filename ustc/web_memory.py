@@ -2656,7 +2656,25 @@ async def call_model(state: AgentState):
         # 调用模型
         response = await model_with_tools.ainvoke(messages)
         chat_logger.info(f"✅ 模型响应完成")
-        
+
+        # === 新增：检测空内容并重新调用 ===
+        # 如果检测到工具结果，但模型返回空内容，强制重新生成
+        content = response.content if hasattr(response, "content") else ""
+        if has_tool_result and (not content or content.strip() == ""):
+            chat_logger.warning(f"⚠️ 检测到工具结果但模型返回空内容，强制重新生成回答")
+            # 添加更强烈的提示
+            messages.append(SystemMessage(
+                content="⚠️ 重要：您之前的回答为空。请基于以下工具返回的知识库内容，直接生成完整的回答。"
+                        "回答格式要求：先给出核心答案，然后提供详细说明，最后列出参考来源。"
+                        "不要只返回参考来源，必须先有具体回答内容。"
+            ))
+            # 重新调用模型
+            response = await model_with_tools.ainvoke(messages)
+            chat_logger.info(f"🔄 重新调用模型完成")
+            new_content = response.content if hasattr(response, "content") else ""
+            chat_logger.info(f"📊 重新生成的回答长度: {len(new_content)} 字符")
+        # === 新增结束 ===
+
         # 记录模型响应内容
         if hasattr(response, "content") and response.content:
             # 记录完整的模型回答内容
@@ -3215,7 +3233,50 @@ async def chat_endpoint(request: ChatRequest, http_request: Request = None):
             chat_logger.info(f"   ℹ️ 无工具调用")
         chat_logger.info(f"🚀 ====== 正常输出API返回内容结束 ======")
         # =============== 新增结束 ===============
-        
+
+        # === 新增：最终空内容fallback ===
+        # 如果最终回答为空但有工具结果，尝试从工具结果中提取信息生成回答
+        if not last_msg.content or last_msg.content.strip() == "":
+            chat_logger.warning(f"⚠️ 最终回答为空，检查是否有工具结果可以生成回答")
+            # 从工具结果中提取信息
+            for msg in final_state.get("messages", []):
+                if isinstance(msg, ToolMessage) and hasattr(msg, "content"):
+                    tool_content = msg.content
+                    # 提取知识库内容
+                    if "相似度:" in tool_content:
+                        # 找到工具结果，尝试从中提取有用信息生成回答
+                        chat_logger.info(f"🔧 从工具结果中提取信息生成回答")
+                        # 提取前几个相似度较高的结果
+                        import re
+                        import json
+                        # 提取REFERENCES中的内容
+                        ref_match = re.search(r'<REFERENCES>(.*?)</REFERENCES>', tool_content, re.DOTALL)
+                        if ref_match:
+                            try:
+                                ref_data = json.loads(ref_match.group(1))
+                                if ref_data:
+                                    # 根据工具结果生成回答
+                                    user_q = request.message
+                                    # 构建一个基于知识库的回答
+                                    fallback_content = f"根据知识库搜索结果，我找到了与您问题相关的信息。\n\n"
+                                    # 添加前3个相关结果的内容摘要
+                                    for i, ref in enumerate(ref_data[:3]):
+                                        title = ref.get('title', '无标题')
+                                        if title and title != '无标题':
+                                            fallback_content += f"**{i+1}. {title}**\n"
+                                    fallback_content += f"\n共找到 {len(ref_data)} 个相关文档。\n"
+                                    fallback_content += f"详情请查看以下参考来源。"
+                                    last_msg.content = fallback_content
+                                    chat_logger.info(f"✅ 已从工具结果生成fallback回答，长度: {len(fallback_content)} 字符")
+                                    break
+                            except Exception as e:
+                                chat_logger.error(f"❌ 解析引用数据失败: {str(e)}")
+            # 如果仍然没有内容，添加明确的提示
+            if not last_msg.content or last_msg.content.strip() == "":
+                last_msg.content = "根据知识库搜索结果，我无法找到与您问题直接相关的具体信息。建议您尝试：\n1. 调整搜索关键词\n2. 联系相关技术支持人员\n3. 查阅更详细的技术文档"
+                chat_logger.warning(f"⚠️ 使用默认fallback回答")
+        # === 新增结束 ===
+
         # =============== 新增：从final_state中提取引用信息 ===============
         references = []
         chat_logger.info(f"🔍 开始从final_state中提取引用信息")
